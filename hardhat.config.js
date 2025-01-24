@@ -2,7 +2,7 @@ require("@nomicfoundation/hardhat-toolbox");
 require("dotenv").config();
 
 module.exports = {
-  solidity: "0.8.19",
+  solidity: "0.8.28",
   networks: {
     baseSepolia: {  // Changed from base_sepolia to match network naming conventions
       url: process.env.BASE_SEPOLIA_RPC_URL || 'https://sepolia.base.org',
