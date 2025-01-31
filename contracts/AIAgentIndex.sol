@@ -45,8 +45,9 @@ contract AIAgentIndex {
         string description;
         bool isActive;
         uint256 addedAt;
-        address owner;         // Owner of this agent entry
+        address owner;         // Owner of this agent entry (technical control)
         uint256 lastUpdateTime;
+        string admin_address;  // NEW: Displayed admin address (can be empty)
     }
     
     struct SearchResult {
@@ -71,6 +72,10 @@ contract AIAgentIndex {
     mapping(string => uint256[]) private addressToIds;
     mapping(string => uint256[]) private nameToIds;
     
+    // NEW: Mapping for pending admin transfers
+    mapping(uint256 => address) public pendingAdmins;
+    
+    // Existing events
     event AgentAdded(uint256 indexed id, string name, uint256 timestamp, address indexed owner);
     event AgentUpdated(uint256 indexed id, string name, address indexed owner);
     event AgentDeactivated(uint256 indexed id, address indexed owner);
@@ -78,10 +83,24 @@ contract AIAgentIndex {
     event FeeUpdated(uint256 newFee);
     event FeeCollectorUpdated(address newCollector);
     
+    // NEW: Events for admin transfer
+    event AdminTransferRequested(uint256 indexed agentId, address indexed currentAdmin, address indexed proposedAdmin);
+    event AdminTransferred(uint256 indexed agentId, address indexed oldAdmin, address indexed newAdmin);
+    
+    bool private initialized;
+    
     constructor() {
         owner = msg.sender;
-        feeCollector = msg.sender;
-        listingFee = MIN_LISTING_FEE;
+    }
+    
+    function initialize(address _feeCollector, uint256 _listingFee) public {
+        require(!initialized, "Contract already initialized");
+        require(_feeCollector != address(0), "Invalid fee collector");
+        require(_listingFee >= MIN_LISTING_FEE, "Fee too low");
+        
+        feeCollector = _feeCollector;
+        listingFee = _listingFee;
+        initialized = true;
     }
     
     modifier onlyOwner() {
@@ -114,12 +133,14 @@ contract AIAgentIndex {
         emit FeeCollectorUpdated(_newCollector);
     }
     
+    // MODIFIED: Updated addAgent function with admin_address
     function addAgent(
         string memory _name,
         string memory _address,
         string memory _socialLink,
         string memory _profileUrl,
-        string memory _description
+        string memory _description,
+        string memory _admin_address  // NEW: Optional admin_address parameter
     ) public payable 
       validString(_name, MAX_NAME_LENGTH)
       validString(_address, MAX_URL_LENGTH)
@@ -139,7 +160,8 @@ contract AIAgentIndex {
             isActive: true,
             addedAt: block.timestamp,
             owner: msg.sender,
-            lastUpdateTime: block.timestamp
+            lastUpdateTime: block.timestamp,
+            admin_address: _admin_address  // NEW: Set initial admin_address
         });
         
         // Update search mappings
@@ -159,6 +181,53 @@ contract AIAgentIndex {
         agentCount++;
         emit AgentAdded(newAgentId, _name, block.timestamp, msg.sender);
         return newAgentId;
+    }
+    
+    // NEW: Function to initiate admin transfer
+    function transferAgentAdmin(uint256 _agentId, address _newAdmin) public onlyAgentOwner(_agentId) {
+        require(_newAdmin != address(0), "New admin cannot be zero address");
+        require(_newAdmin != agents[_agentId].owner, "New admin cannot be current admin");
+        
+        pendingAdmins[_agentId] = _newAdmin;
+        emit AdminTransferRequested(_agentId, agents[_agentId].owner, _newAdmin);
+    }
+    
+    // NEW: Function to accept admin transfer
+    function acceptAgentAdmin(uint256 _agentId) public {
+        require(msg.sender == pendingAdmins[_agentId], "Only pending admin can accept");
+        require(agents[_agentId].owner != address(0), "Agent does not exist");
+        
+        address oldAdmin = agents[_agentId].owner;
+        agents[_agentId].owner = msg.sender;
+        agents[_agentId].admin_address = toAsciiString(msg.sender);
+        delete pendingAdmins[_agentId];
+        
+        emit AdminTransferred(_agentId, oldAdmin, msg.sender);
+    }
+    
+    // NEW: Function to cancel admin transfer
+    function cancelAdminTransfer(uint256 _agentId) public onlyAgentOwner(_agentId) {
+        require(pendingAdmins[_agentId] != address(0), "No pending admin transfer");
+        delete pendingAdmins[_agentId];
+    }
+    
+    // NEW: Helper function to convert address to string
+    function toAsciiString(address x) private pure returns (string memory) {
+        bytes memory s = new bytes(40);
+        for (uint i = 0; i < 20; i++) {
+            bytes1 b = bytes1(uint8(uint(uint160(x)) / (2**(8*(19 - i)))));
+            bytes1 hi = bytes1(uint8(b) / 16);
+            bytes1 lo = bytes1(uint8(b) - 16 * uint8(hi));
+            s[2*i] = char(hi);
+            s[2*i+1] = char(lo);            
+        }
+        return string(s);
+    }
+    
+    // NEW: Helper function for toAsciiString
+    function char(bytes1 b) private pure returns (bytes1 c) {
+        if (uint8(b) < 10) return bytes1(uint8(b) + 0x30);
+        else return bytes1(uint8(b) + 0x57);
     }
     
     function updateAgent(
@@ -246,13 +315,12 @@ contract AIAgentIndex {
     function _containsValidChars(string memory str) internal pure returns (bool) {
         bytes memory b = bytes(str);
         for(uint i; i < b.length; i++) {
-            bytes1 char = b[i];
-            if(!(char >= 0x20 && char <= 0x7E)) return false; // Only printable ASCII
+            bytes1 currentChar = b[i];
+            if(!(currentChar >= 0x20 && currentChar <= 0x7E)) return false; // Only printable ASCII
         }
         return true;
     }
     
-    // Existing search functions remain unchanged
     function searchByAddress(string memory _address) public view returns (SearchResult[] memory) {
         uint256[] memory ids = addressToIds[_address];
         return _buildSearchResults(ids);
@@ -299,22 +367,27 @@ contract AIAgentIndex {
                 bytes1 sourceChar = sourceBytes[i + j];
                 bytes1 searchChar = searchBytes[j];
                 
+                // Convert to lowercase for comparison
                 if ((sourceChar >= 0x41 && sourceChar <= 0x5A) && (searchChar >= 0x41 && searchChar <= 0x5A)) {
+                    // Both uppercase, compare directly
                     if (sourceChar != searchChar) {
                         found = false;
                         break;
                     }
                 } else if ((sourceChar >= 0x41 && sourceChar <= 0x5A) && (searchChar >= 0x61 && searchChar <= 0x7A)) {
-                    if (sourceChar != (searchChar - 32)) {
+                    // Source uppercase, search lowercase
+                    if ((uint8(sourceChar) + 32) != uint8(searchChar)) {
                         found = false;
                         break;
                     }
                 } else if ((sourceChar >= 0x61 && sourceChar <= 0x7A) && (searchChar >= 0x41 && searchChar <= 0x5A)) {
-                    if (sourceChar != (searchChar + 32)) {
+                    // Source lowercase, search uppercase
+                    if (uint8(sourceChar) != (uint8(searchChar) + 32)) {
                         found = false;
                         break;
                     }
                 } else {
+                    // Both lowercase or other characters
                     if (sourceChar != searchChar) {
                         found = false;
                         break;

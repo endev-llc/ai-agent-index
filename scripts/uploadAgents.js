@@ -108,6 +108,7 @@ async function main() {
                 record.social_link,
                 record.profile_url,
                 record.description,
+                record.owner_address || "",  // Pass empty string if owner_address is blank/null
                 { value: await contract.listingFee() }
             );
             await tx.wait();
