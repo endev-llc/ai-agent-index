@@ -57,7 +57,7 @@ async function main() {
     console.log(`Previous failed uploads: ${failedUploads.length}`);
 
     // Contract address from your deployment
-    const CONTRACT_ADDRESS = 'CONTRACT_ADDRESS';
+    const CONTRACT_ADDRESS = '0xDe438021611C7878ECeb271FCEF15Fc12890019f';
     
     // Read the CSV file
     const fileContent = fs.readFileSync('data/agents.csv', 'utf-8');

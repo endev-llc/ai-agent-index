@@ -57,7 +57,7 @@ contract AIAgentIndex {
     
     // Constants for validation
     uint256 public constant MAX_NAME_LENGTH = 100;
-    uint256 public constant MAX_DESCRIPTION_LENGTH = 2000;
+    uint256 public constant MAX_DESCRIPTION_LENGTH = 5000;
     uint256 public constant MAX_URL_LENGTH = 500;
     uint256 public constant MIN_LISTING_FEE = 0.0001 ether;
     
@@ -114,10 +114,10 @@ contract AIAgentIndex {
         _;
     }
     
+    // MODIFIED: Removed _containsValidChars check from validString modifier
     modifier validString(string memory str, uint256 maxLength) {
         require(bytes(str).length > 0, "String cannot be empty");
         require(bytes(str).length <= maxLength, "String too long");
-        require(_containsValidChars(str), "Invalid characters in string");
         _;
     }
     
@@ -310,15 +310,6 @@ contract AIAgentIndex {
                 break;
             }
         }
-    }
-    
-    function _containsValidChars(string memory str) internal pure returns (bool) {
-        bytes memory b = bytes(str);
-        for(uint i; i < b.length; i++) {
-            bytes1 currentChar = b[i];
-            if(!(currentChar >= 0x20 && currentChar <= 0x7E)) return false; // Only printable ASCII
-        }
-        return true;
     }
     
     function searchByAddress(string memory _address) public view returns (SearchResult[] memory) {
