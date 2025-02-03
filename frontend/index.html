@@ -1,0 +1,452 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI Agent Index Interface</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/ethers/6.7.0/ethers.umd.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/tailwindcss/2.2.19/tailwind.min.js"></script>
+    <style>
+        .tab-content { display: none; }
+        .tab-content.active { display: block; }
+        .loading { animation: spin 1s linear infinite; }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+    </style>
+</head>
+<body class="bg-gray-100 min-h-screen">
+    <nav class="bg-blue-600 p-4">
+        <div class="container mx-auto flex justify-between items-center">
+            <div>
+                <h1 class="text-white text-2xl font-bold">AI Agent Index</h1>
+                <p class="text-blue-100 text-sm">Network: Base Sepolia Testnet</p>
+            </div>
+            <div>
+                <button id="connectWallet" class="bg-white text-blue-600 px-4 py-2 rounded hover:bg-blue-50">
+                    Connect Wallet
+                </button>
+                <span id="walletAddress" class="text-white ml-2"></span>
+            </div>
+        </div>
+    </nav>
+
+    <div class="container mx-auto p-4">
+        <!-- Tab Navigation -->
+        <div class="flex space-x-2 mb-4">
+            <button class="tab-button bg-blue-500 text-white px-4 py-2 rounded" data-tab="search">Search</button>
+            <button class="tab-button bg-blue-500 text-white px-4 py-2 rounded wallet-required" data-tab="add">Add Agent</button>
+            <button class="tab-button bg-blue-500 text-white px-4 py-2 rounded wallet-required" data-tab="manage">Manage Agent</button>
+            <button class="tab-button bg-blue-500 text-white px-4 py-2 rounded wallet-required" data-tab="admin">Admin</button>
+        </div>
+
+        <!-- Search Tab (No wallet required) -->
+        <div id="search" class="tab-content active bg-white rounded-lg shadow p-4">
+            <h2 class="text-xl font-bold mb-4">Search Agents</h2>
+            <div class="grid grid-cols-1 gap-4">
+                <div>
+                    <label class="block mb-2">Search by Keyword</label>
+                    <input type="text" id="searchKeyword" class="w-full p-2 border rounded" placeholder="Enter keyword">
+                    <button onclick="searchByKeyword()" class="mt-2 bg-blue-500 text-white px-4 py-2 rounded">Search</button>
+                </div>
+                <div>
+                    <label class="block mb-2">Search by Address</label>
+                    <input type="text" id="searchAddress" class="w-full p-2 border rounded" placeholder="Enter address">
+                    <button onclick="searchByAddress()" class="mt-2 bg-blue-500 text-white px-4 py-2 rounded">Search</button>
+                </div>
+                <div>
+                    <label class="block mb-2">Search by Name</label>
+                    <input type="text" id="searchName" class="w-full p-2 border rounded" placeholder="Enter name">
+                    <button onclick="searchByName()" class="mt-2 bg-blue-500 text-white px-4 py-2 rounded">Search</button>
+                </div>
+            </div>
+            <div id="searchResults" class="mt-4"></div>
+        </div>
+
+        <!-- Add Agent Tab (Wallet required) -->
+        <div id="add" class="tab-content bg-white rounded-lg shadow p-4">
+            <div class="wallet-notice bg-yellow-100 p-4 rounded mb-4">Please connect your wallet to add an agent.</div>
+            <div class="wallet-content hidden">
+                <h2 class="text-xl font-bold mb-4">Add New Agent</h2>
+                <form id="addAgentForm" class="grid grid-cols-1 gap-4">
+                    <!-- Form fields same as before -->
+                    <div>
+                        <label class="block mb-2">Name</label>
+                        <input type="text" id="agentName" class="w-full p-2 border rounded" required>
+                    </div>
+                    <div>
+                        <label class="block mb-2">Address</label>
+                        <input type="text" id="agentAddress" class="w-full p-2 border rounded" required>
+                    </div>
+                    <div>
+                        <label class="block mb-2">Social Link</label>
+                        <input type="text" id="agentSocial" class="w-full p-2 border rounded" required>
+                    </div>
+                    <div>
+                        <label class="block mb-2">Profile URL</label>
+                        <input type="text" id="agentProfile" class="w-full p-2 border rounded" required>
+                    </div>
+                    <div>
+                        <label class="block mb-2">Description</label>
+                        <textarea id="agentDescription" class="w-full p-2 border rounded" rows="4" required></textarea>
+                    </div>
+                    <div>
+                        <label class="block mb-2">Admin Address (Optional)</label>
+                        <input type="text" id="adminAddress" class="w-full p-2 border rounded">
+                    </div>
+                    <button type="submit" class="bg-blue-500 text-white px-4 py-2 rounded">Add Agent</button>
+                </form>
+            </div>
+        </div>
+
+        <!-- Manage Agent Tab (Wallet required) -->
+        <div id="manage" class="tab-content bg-white rounded-lg shadow p-4">
+            <div class="wallet-notice bg-yellow-100 p-4 rounded mb-4">Please connect your wallet to manage agents.</div>
+            <div class="wallet-content hidden">
+                <h2 class="text-xl font-bold mb-4">Manage Agent</h2>
+                <!-- Management content same as before -->
+                <div class="grid grid-cols-1 gap-4">
+                    <div>
+                        <label class="block mb-2">Agent ID</label>
+                        <input type="number" id="manageAgentId" class="w-full p-2 border rounded" min="0">
+                        <button onclick="getAgentDetails()" class="mt-2 bg-blue-500 text-white px-4 py-2 rounded">Get Details</button>
+                    </div>
+                    <div id="agentDetails" class="hidden"></div>
+                    <div class="grid grid-cols-2 gap-4">
+                        <button onclick="deactivateAgent()" class="bg-red-500 text-white px-4 py-2 rounded">Deactivate</button>
+                        <button onclick="reactivateAgent()" class="bg-green-500 text-white px-4 py-2 rounded">Reactivate</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Admin Tab (Wallet required) -->
+        <div id="admin" class="tab-content bg-white rounded-lg shadow p-4">
+            <div class="wallet-notice bg-yellow-100 p-4 rounded mb-4">Please connect your wallet to access admin functions.</div>
+            <div class="wallet-content hidden">
+                <h2 class="text-xl font-bold mb-4">Admin Functions</h2>
+                <!-- Admin content same as before -->
+                <div class="grid grid-cols-1 gap-4">
+                    <div>
+                        <label class="block mb-2">New Listing Fee (ETH)</label>
+                        <input type="number" id="newFee" class="w-full p-2 border rounded" step="0.0001">
+                        <button onclick="setListingFee()" class="mt-2 bg-blue-500 text-white px-4 py-2 rounded">Update Fee</button>
+                    </div>
+                    <div>
+                        <label class="block mb-2">New Fee Collector Address</label>
+                        <input type="text" id="newCollector" class="w-full p-2 border rounded">
+                        <button onclick="setFeeCollector()" class="mt-2 bg-blue-500 text-white px-4 py-2 rounded">Update Collector</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Contract configuration
+        const CONTRACT_ADDRESS = '0xDe438021611C7878ECeb271FCEF15Fc12890019f';
+        const RPC_URL = 'https://sepolia.base.org';
+        const CONTRACT_ABI = [
+            // Search functions
+            "function searchByKeyword(string) view returns (tuple(uint256 id, tuple(string name, string address_, string socialLink, string profileUrl, string description, bool isActive, uint256 addedAt, address owner, uint256 lastUpdateTime, string admin_address) agent)[])",
+            "function searchByAddress(string) view returns (tuple(uint256 id, tuple(string name, string address_, string socialLink, string profileUrl, string description, bool isActive, uint256 addedAt, address owner, uint256 lastUpdateTime, string admin_address) agent)[])",
+            "function searchByName(string) view returns (tuple(uint256 id, tuple(string name, string address_, string socialLink, string profileUrl, string description, bool isActive, uint256 addedAt, address owner, uint256 lastUpdateTime, string admin_address) agent)[])",
+            // Agent management
+            "function addAgent(string,string,string,string,string,string) payable returns (uint256)",
+            "function updateAgent(uint256,string,string,string,string,string)",
+            "function deactivateAgent(uint256)",
+            "function reactivateAgent(uint256) payable",
+            "function getAgent(uint256) view returns (tuple(string name, string address_, string socialLink, string profileUrl, string description, bool isActive, uint256 addedAt, address owner, uint256 lastUpdateTime, string admin_address))",
+            // Admin functions
+            "function setListingFee(uint256)",
+            "function setFeeCollector(address)",
+            "function listingFee() view returns (uint256)",
+            "function owner() view returns (address)"
+        ];
+
+        // Initialize providers
+        let readProvider;
+        let writeProvider;
+        let readContract;
+        let writeContract;
+        
+        // Initialize read-only provider immediately
+        async function initializeReadProvider() {
+            readProvider = new ethers.JsonRpcProvider(RPC_URL);
+            readContract = new ethers.Contract(CONTRACT_ADDRESS, CONTRACT_ABI, readProvider);
+        }
+        
+        // Initialize on page load
+        initializeReadProvider();
+
+        // Wallet connection
+        document.getElementById('connectWallet').addEventListener('click', async () => {
+            if (!window.ethereum) {
+                alert('Please install MetaMask!');
+                return;
+            }
+
+            try {
+                const accounts = await window.ethereum.request({ method: 'eth_requestAccounts' });
+                writeProvider = new ethers.BrowserProvider(window.ethereum);
+                const signer = await writeProvider.getSigner();
+                writeContract = new ethers.Contract(CONTRACT_ADDRESS, CONTRACT_ABI, signer);
+
+                document.getElementById('walletAddress').textContent = 
+                    `${accounts[0].substring(0, 6)}...${accounts[0].substring(38)}`;
+
+                // Switch to Base Sepolia if needed
+                try {
+                    await window.ethereum.request({
+                        method: 'wallet_switchEthereumChain',
+                        params: [{ chainId: '84532' }]
+                    });
+                } catch (error) {
+                    if (error.code === 4902) {
+                        await window.ethereum.request({
+                            method: 'wallet_addEthereumChain',
+                            params: [{
+                                chainId: '84532',
+                                chainName: 'Base Sepolia',
+                                nativeCurrency: { name: 'ETH', symbol: 'ETH', decimals: 18 },
+                                rpcUrls: ['https://sepolia.base.org'],
+                                blockExplorerUrls: ['https://sepolia.basescan.org']
+                            }]
+                        });
+                    }
+                }
+
+                // Show wallet-required content
+                document.querySelectorAll('.wallet-notice').forEach(el => el.classList.add('hidden'));
+                document.querySelectorAll('.wallet-content').forEach(el => el.classList.remove('hidden'));
+            } catch (error) {
+                console.error('Error connecting wallet:', error);
+                alert('Failed to connect wallet');
+            }
+        });
+
+        // Search functions (using read-only contract)
+        async function searchByKeyword() {
+            const keyword = document.getElementById('searchKeyword').value;
+            try {
+                const results = await readContract.searchByKeyword(keyword);
+                displaySearchResults(results);
+            } catch (error) {
+                console.error('Error searching by keyword:', error);
+                alert('Failed to search by keyword');
+            }
+        }
+
+        async function searchByAddress() {
+            const address = document.getElementById('searchAddress').value;
+            try {
+                const results = await readContract.searchByAddress(address);
+                displaySearchResults(results);
+            } catch (error) {
+                console.error('Error searching by address:', error);
+                alert('Failed to search by address');
+            }
+        }
+
+        async function searchByName() {
+            const name = document.getElementById('searchName').value;
+            try {
+                const results = await readContract.searchByName(name);
+                displaySearchResults(results);
+            } catch (error) {
+                console.error('Error searching by name:', error);
+                alert('Failed to search by name');
+            }
+        }
+
+        function displaySearchResults(results) {
+            const resultsDiv = document.getElementById('searchResults');
+            resultsDiv.innerHTML = '';
+
+            if (results.length === 0) {
+                resultsDiv.innerHTML = '<p class="text-gray-600">No results found</p>';
+                return;
+            }
+
+            results.forEach(result => {
+                const agent = result.agent;
+                const div = document.createElement('div');
+                div.className = 'bg-gray-50 p-4 rounded mb-4';
+                div.innerHTML = `
+                    <h3 class="font-bold">${agent.name}</h3>
+                    <p class="text-sm text-gray-600">ID: ${result.id}</p>
+                    <p>${agent.description}</p>
+                    <p class="text-sm">
+                        <a href="${agent.socialLink}" target="_blank" class="text-blue-500">Social Link</a> |
+                        <a href="${agent.profileUrl}" target="_blank" class="text-blue-500">Profile</a>
+                    </p>
+                    <p class="text-sm text-gray-600">Last Updated: ${new Date(Number(agent.lastUpdateTime) * 1000).toLocaleDateString()}</p>
+                `;
+                resultsDiv.appendChild(div);
+            });
+        }
+
+        // Write operations (requiring wallet connection)
+        document.getElementById('addAgentForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            if (!writeContract) {
+                alert('Please connect your wallet first');
+                return;
+            }
+
+            try {
+                const fee = await readContract.listingFee();
+                const tx = await writeContract.addAgent(
+                    document.getElementById('agentName').value,
+                    document.getElementById('agentAddress').value,
+                    document.getElementById('agentSocial').value,
+                    document.getElementById('agentProfile').value,
+                    document.getElementById('agentDescription').value,
+                    document.getElementById('adminAddress').value || "",
+                    { value: fee }
+                );
+                
+                await tx.wait();
+                alert('Agent added successfully!');
+                e.target.reset();
+            } catch (error) {
+                console.error('Error adding agent:', error);
+                alert('Failed to add agent: ' + error.message);
+            }
+        });
+
+        async function getAgentDetails() {
+            const agentId = document.getElementById('manageAgentId').value;
+            try {
+                // Use read contract for viewing details
+                const agent = await readContract.getAgent(agentId);
+                
+                const detailsDiv = document.getElementById('agentDetails');
+                detailsDiv.innerHTML = `
+                    <div class="bg-gray-50 p-4 rounded mb-4">
+                        <h3 class="font-bold">${agent.name}</h3>
+                        <p>${agent.description}</p>
+                        <p class="text-sm">
+                            <strong>Address:</strong> ${agent.address_}<br>
+                            <strong>Social:</strong> <a href="${agent.socialLink}" target="_blank" class="text-blue-500">${agent.socialLink}</a><br>
+                            <strong>Profile:</strong> <a href="${agent.profileUrl}" target="_blank" class="text-blue-500">${agent.profileUrl}</a><br>
+                            <strong>Status:</strong> ${agent.isActive ? 'Active' : 'Inactive'}<br>
+                            <strong>Owner:</strong> ${agent.owner}<br>
+                            <strong>Admin Address:</strong> ${agent.admin_address || 'Not set'}<br>
+                            <strong>Added:</strong> ${new Date(Number(agent.addedAt) * 1000).toLocaleDateString()}<br>
+                            <strong>Last Updated:</strong> ${new Date(Number(agent.lastUpdateTime) * 1000).toLocaleDateString()}
+                        </p>
+                    </div>
+                `;
+                detailsDiv.classList.remove('hidden');
+            } catch (error) {
+                console.error('Error getting agent details:', error);
+                alert('Failed to get agent details: ' + error.message);
+            }
+        }
+
+        async function deactivateAgent() {
+            if (!writeContract) {
+                alert('Please connect your wallet first');
+                return;
+            }
+
+            try {
+                const agentId = document.getElementById('manageAgentId').value;
+                const tx = await writeContract.deactivateAgent(agentId);
+                await tx.wait();
+                alert('Agent deactivated successfully!');
+                await getAgentDetails(); // Refresh details
+            } catch (error) {
+                console.error('Error deactivating agent:', error);
+                alert('Failed to deactivate agent: ' + error.message);
+            }
+        }
+
+        async function reactivateAgent() {
+            if (!writeContract) {
+                alert('Please connect your wallet first');
+                return;
+            }
+
+            try {
+                const agentId = document.getElementById('manageAgentId').value;
+                const fee = await readContract.listingFee();
+                const tx = await writeContract.reactivateAgent(agentId, { value: fee });
+                await tx.wait();
+                alert('Agent reactivated successfully!');
+                await getAgentDetails(); // Refresh details
+            } catch (error) {
+                console.error('Error reactivating agent:', error);
+                alert('Failed to reactivate agent: ' + error.message);
+            }
+        }
+
+        async function setListingFee() {
+            if (!writeContract) {
+                alert('Please connect your wallet first');
+                return;
+            }
+
+            try {
+                const newFee = ethers.parseEther(document.getElementById('newFee').value);
+                const tx = await writeContract.setListingFee(newFee);
+                await tx.wait();
+                alert('Listing fee updated successfully!');
+            } catch (error) {
+                console.error('Error updating listing fee:', error);
+                alert('Failed to update listing fee: ' + error.message);
+            }
+        }
+
+        async function setFeeCollector() {
+            if (!writeContract) {
+                alert('Please connect your wallet first');
+                return;
+            }
+
+            try {
+                const newCollector = document.getElementById('newCollector').value;
+                const tx = await writeContract.setFeeCollector(newCollector);
+                await tx.wait();
+                alert('Fee collector updated successfully!');
+            } catch (error) {
+                console.error('Error updating fee collector:', error);
+                alert('Failed to update fee collector: ' + error.message);
+            }
+        }
+
+        // Tab handling
+        document.querySelectorAll('.tab-button').forEach(button => {
+            button.addEventListener('click', () => {
+                // If tab requires wallet and wallet isn't connected, show alert
+                if (button.classList.contains('wallet-required') && !writeContract) {
+                    alert('Please connect your wallet to access this feature');
+                    return;
+                }
+                
+                document.querySelectorAll('.tab-content').forEach(content => {
+                    content.classList.remove('active');
+                });
+                document.getElementById(button.dataset.tab).classList.add('active');
+            });
+        });
+
+        // Network display
+        async function displayCurrentNetwork() {
+            if (window.ethereum) {
+                const chainId = await window.ethereum.request({ method: 'eth_chainId' });
+                const networkName = chainId === '84532' ? 'Base Sepolia Testnet' : 'Unknown Network';
+                document.querySelector('.text-blue-100').textContent = `Network: ${networkName}`;
+            }
+        }
+
+        // Initialize network display
+        displayCurrentNetwork();
+        if (window.ethereum) {
+            window.ethereum.on('chainChanged', displayCurrentNetwork);
+        }
+    </script>
+</body>
+</html>
