@@ -54,6 +54,12 @@ contract AIAgentIndex {
         uint256 id;
         Agent agent;
     }
+
+    struct RankedResult {
+        uint256 id;
+        Agent agent;
+        uint256 rank;
+    }
     
     // Constants for validation
     uint256 public constant MAX_NAME_LENGTH = 100;
@@ -323,66 +329,125 @@ contract AIAgentIndex {
     }
     
     function searchByKeyword(string memory keyword) public view returns (SearchResult[] memory) {
-        SearchResult[] memory results = new SearchResult[](agentCount);
-        uint256 resultCount = 0;
-        
+        // First pass to count matching results
+        uint256 matchCount = 0;
         for (uint256 i = 0; i < agentCount; i++) {
             Agent memory agent = agents[i];
-            if (agent.isActive &&
-                (_containsIgnoreCase(agent.name, keyword) ||
-                 _containsIgnoreCase(agent.description, keyword) ||
-                 _containsIgnoreCase(agent.socialLink, keyword) ||
-                 _containsIgnoreCase(agent.profileUrl, keyword))) {
-                results[resultCount] = SearchResult(i, agent);
-                resultCount++;
+            if (agent.isActive && (
+                _containsIgnoreCase(agent.name, keyword) ||
+                _containsIgnoreCase(agent.description, keyword) ||
+                _containsIgnoreCase(agent.address_, keyword) ||
+                _containsIgnoreCase(agent.socialLink, keyword) ||
+                _containsIgnoreCase(agent.profileUrl, keyword) ||
+                _containsIgnoreCase(agent.admin_address, keyword)
+            )) {
+                matchCount++;
             }
         }
-        
-        SearchResult[] memory trimmedResults = new SearchResult[](resultCount);
-        for (uint256 i = 0; i < resultCount; i++) {
-            trimmedResults[i] = results[i];
+
+        // Create temporary array for ranking
+        RankedResult[] memory rankedResults = new RankedResult[](matchCount);
+        uint256 resultIndex = 0;
+
+        // Second pass to collect and rank results
+        for (uint256 i = 0; i < agentCount; i++) {
+            Agent memory agent = agents[i];
+            
+            // Skip inactive agents
+            if (!agent.isActive) continue;
+
+            // Check if agent matches search criteria
+            bool matches = false;
+            uint256 rank = 0;
+
+            // Name matches (highest priority - 1000 points)
+            if (_containsIgnoreCase(agent.name, keyword)) {
+                matches = true;
+                rank += 1000;
+            }
+
+            // Description matches (second priority - 500 points)
+            if (_containsIgnoreCase(agent.description, keyword)) {
+                matches = true;
+                rank += 500;
+            }
+
+            // Other fields (100 points each)
+            if (_containsIgnoreCase(agent.address_, keyword)) {
+                matches = true;
+                rank += 100;
+            }
+            if (_containsIgnoreCase(agent.socialLink, keyword)) {
+                matches = true;
+                rank += 100;
+            }
+            if (_containsIgnoreCase(agent.profileUrl, keyword)) {
+                matches = true;
+                rank += 100;
+            }
+            if (_containsIgnoreCase(agent.admin_address, keyword)) {
+                matches = true;
+                rank += 100;
+            }
+
+            // If there's any match, add to results
+            if (matches) {
+                rankedResults[resultIndex] = RankedResult(i, agent, rank);
+                resultIndex++;
+            }
         }
-        
-        return trimmedResults;
+
+        // Sort results by rank (bubble sort - can be optimized if needed)
+        for (uint256 i = 0; i < matchCount - 1; i++) {
+            for (uint256 j = 0; j < matchCount - i - 1; j++) {
+                if (rankedResults[j].rank < rankedResults[j + 1].rank) {
+                    RankedResult memory temp = rankedResults[j];
+                    rankedResults[j] = rankedResults[j + 1];
+                    rankedResults[j + 1] = temp;
+                }
+            }
+        }
+
+        // Create final SearchResult array
+        SearchResult[] memory finalResults = new SearchResult[](matchCount);
+        for (uint256 i = 0; i < matchCount; i++) {
+            finalResults[i] = SearchResult(rankedResults[i].id, rankedResults[i].agent);
+        }
+
+        return finalResults;
     }
-    
+
+    // Update the _containsIgnoreCase function to better handle partial matches
     function _containsIgnoreCase(string memory source, string memory search) private pure returns (bool) {
+        if (bytes(source).length == 0 || bytes(search).length == 0) {
+            return false;
+        }
+
         bytes memory sourceBytes = bytes(source);
         bytes memory searchBytes = bytes(search);
-        
+
         if (searchBytes.length > sourceBytes.length) return false;
-        
-        for (uint i = 0; i <= sourceBytes.length - searchBytes.length; i++) {
+
+        for (uint256 i = 0; i <= sourceBytes.length - searchBytes.length; i++) {
             bool found = true;
-            for (uint j = 0; j < searchBytes.length; j++) {
+            for (uint256 j = 0; j < searchBytes.length; j++) {
                 bytes1 sourceChar = sourceBytes[i + j];
                 bytes1 searchChar = searchBytes[j];
+
+                // Convert both characters to lowercase for comparison
+                uint8 sourceLower = uint8(sourceChar);
+                if (sourceLower >= 65 && sourceLower <= 90) {
+                    sourceLower += 32;
+                }
                 
-                // Convert to lowercase for comparison
-                if ((sourceChar >= 0x41 && sourceChar <= 0x5A) && (searchChar >= 0x41 && searchChar <= 0x5A)) {
-                    // Both uppercase, compare directly
-                    if (sourceChar != searchChar) {
-                        found = false;
-                        break;
-                    }
-                } else if ((sourceChar >= 0x41 && sourceChar <= 0x5A) && (searchChar >= 0x61 && searchChar <= 0x7A)) {
-                    // Source uppercase, search lowercase
-                    if ((uint8(sourceChar) + 32) != uint8(searchChar)) {
-                        found = false;
-                        break;
-                    }
-                } else if ((sourceChar >= 0x61 && sourceChar <= 0x7A) && (searchChar >= 0x41 && searchChar <= 0x5A)) {
-                    // Source lowercase, search uppercase
-                    if (uint8(sourceChar) != (uint8(searchChar) + 32)) {
-                        found = false;
-                        break;
-                    }
-                } else {
-                    // Both lowercase or other characters
-                    if (sourceChar != searchChar) {
-                        found = false;
-                        break;
-                    }
+                uint8 searchLower = uint8(searchChar);
+                if (searchLower >= 65 && searchLower <= 90) {
+                    searchLower += 32;
+                }
+
+                if (sourceLower != searchLower) {
+                    found = false;
+                    break;
                 }
             }
             if (found) return true;
