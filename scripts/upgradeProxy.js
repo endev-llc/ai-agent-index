@@ -2,7 +2,7 @@ const { ethers } = require("hardhat");
 
 async function main() {
   const proxyAddress = "0xDe438021611C7878ECeb271FCEF15Fc12890019f"; // Your existing proxy address
-  const newImplementationAddress = "0x3a56Be669BFAa8DAf0Bba92d3F1349bF968AA461";
+  const newImplementationAddress = "0x06327C0Db1d12e5Eb80D8dF0C1a57099ADBEDB91";
 
   // Get the proxy contract
   const proxy = await ethers.getContractAt("AIAgentIndexProxy", proxyAddress);
