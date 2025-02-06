@@ -1,41 +1,6 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.19;
 
-// Proxy contract for upgradability
-contract AIAgentIndexProxy {
-    address public implementation;
-    address public owner;
-    
-    constructor() {
-        owner = msg.sender;
-    }
-    
-    modifier onlyOwner() {
-        require(msg.sender == owner, "Only owner can call this");
-        _;
-    }
-    
-    function upgradeTo(address newImplementation) public onlyOwner {
-        implementation = newImplementation;
-    }
-    
-    fallback() external payable {
-        address _impl = implementation;
-        require(_impl != address(0), "Implementation not set");
-        
-        assembly {
-            calldatacopy(0, 0, calldatasize())
-            let result := delegatecall(gas(), _impl, 0, calldatasize(), 0, 0)
-            returndatacopy(0, 0, returndatasize())
-            switch result
-            case 0 { revert(0, returndatasize()) }
-            default { return(0, returndatasize()) }
-        }
-    }
-    
-    receive() external payable {}
-}
-
 contract AIAgentIndex {
     struct Agent {
         string name;
@@ -53,12 +18,6 @@ contract AIAgentIndex {
     struct SearchResult {
         uint256 id;
         Agent agent;
-    }
-
-    struct RankedResult {
-        uint256 id;
-        Agent agent;
-        uint256 rank;
     }
     
     // Constants for validation
@@ -88,8 +47,6 @@ contract AIAgentIndex {
     event AgentReactivated(uint256 indexed id, address indexed owner);
     event FeeUpdated(uint256 newFee);
     event FeeCollectorUpdated(address newCollector);
-    
-    // NEW: Events for admin transfer
     event AdminTransferRequested(uint256 indexed agentId, address indexed currentAdmin, address indexed proposedAdmin);
     event AdminTransferred(uint256 indexed agentId, address indexed oldAdmin, address indexed newAdmin);
     
@@ -120,7 +77,6 @@ contract AIAgentIndex {
         _;
     }
     
-    // MODIFIED: Removed _containsValidChars check from validString modifier
     modifier validString(string memory str, uint256 maxLength) {
         require(bytes(str).length > 0, "String cannot be empty");
         require(bytes(str).length <= maxLength, "String too long");
@@ -139,14 +95,13 @@ contract AIAgentIndex {
         emit FeeCollectorUpdated(_newCollector);
     }
     
-    // MODIFIED: Updated addAgent function with admin_address
     function addAgent(
         string memory _name,
         string memory _address,
         string memory _socialLink,
         string memory _profileUrl,
         string memory _description,
-        string memory _admin_address  // NEW: Optional admin_address parameter
+        string memory _admin_address
     ) public payable 
       validString(_name, MAX_NAME_LENGTH)
       validString(_address, MAX_URL_LENGTH)
@@ -167,7 +122,7 @@ contract AIAgentIndex {
             addedAt: block.timestamp,
             owner: msg.sender,
             lastUpdateTime: block.timestamp,
-            admin_address: _admin_address  // NEW: Set initial admin_address
+            admin_address: _admin_address
         });
         
         // Update search mappings
@@ -189,7 +144,6 @@ contract AIAgentIndex {
         return newAgentId;
     }
     
-    // NEW: Function to initiate admin transfer
     function transferAgentAdmin(uint256 _agentId, address _newAdmin) public onlyAgentOwner(_agentId) {
         require(_newAdmin != address(0), "New admin cannot be zero address");
         require(_newAdmin != agents[_agentId].owner, "New admin cannot be current admin");
@@ -198,7 +152,6 @@ contract AIAgentIndex {
         emit AdminTransferRequested(_agentId, agents[_agentId].owner, _newAdmin);
     }
     
-    // NEW: Function to accept admin transfer
     function acceptAgentAdmin(uint256 _agentId) public {
         require(msg.sender == pendingAdmins[_agentId], "Only pending admin can accept");
         require(agents[_agentId].owner != address(0), "Agent does not exist");
@@ -211,13 +164,11 @@ contract AIAgentIndex {
         emit AdminTransferred(_agentId, oldAdmin, msg.sender);
     }
     
-    // NEW: Function to cancel admin transfer
     function cancelAdminTransfer(uint256 _agentId) public onlyAgentOwner(_agentId) {
         require(pendingAdmins[_agentId] != address(0), "No pending admin transfer");
         delete pendingAdmins[_agentId];
     }
     
-    // NEW: Helper function to convert address to string
     function toAsciiString(address x) private pure returns (string memory) {
         bytes memory s = new bytes(40);
         for (uint i = 0; i < 20; i++) {
@@ -230,7 +181,6 @@ contract AIAgentIndex {
         return string(s);
     }
     
-    // NEW: Helper function for toAsciiString
     function char(bytes1 b) private pure returns (bytes1 c) {
         if (uint8(b) < 10) return bytes1(uint8(b) + 0x30);
         else return bytes1(uint8(b) + 0x57);
@@ -317,156 +267,67 @@ contract AIAgentIndex {
             }
         }
     }
-    
-    function searchByAddress(string memory _address) public view returns (SearchResult[] memory) {
-        uint256[] memory ids = addressToIds[_address];
-        return _buildSearchResults(ids);
-    }
-    
-    function searchByName(string memory _name) public view returns (SearchResult[] memory) {
-        uint256[] memory ids = nameToIds[_name];
-        return _buildSearchResults(ids);
-    }
-    
-    function searchByKeyword(string memory keyword) public view returns (SearchResult[] memory) {
-        // First pass to count matching results
-        uint256 matchCount = 0;
-        for (uint256 i = 0; i < agentCount; i++) {
-            Agent memory agent = agents[i];
-            if (agent.isActive && (
-                _containsIgnoreCase(agent.name, keyword) ||
-                _containsIgnoreCase(agent.description, keyword) ||
-                _containsIgnoreCase(agent.address_, keyword) ||
-                _containsIgnoreCase(agent.socialLink, keyword) ||
-                _containsIgnoreCase(agent.profileUrl, keyword) ||
-                _containsIgnoreCase(agent.admin_address, keyword)
-            )) {
-                matchCount++;
-            }
-        }
 
-        // Create temporary array for ranking
-        RankedResult[] memory rankedResults = new RankedResult[](matchCount);
-        uint256 resultIndex = 0;
+    // New paginated search function
+    function searchPaginated(
+        string memory keyword,
+        uint256 startIndex,
+        uint256 pageSize
+    ) public view returns (
+        SearchResult[] memory results,
+        uint256 nextStartIndex,
+        bool hasMore
+    ) {
+        require(pageSize > 0 && pageSize <= 50, "Invalid page size");
+        require(startIndex <= agentCount, "Start index out of bounds");
 
-        // Second pass to collect and rank results
-        for (uint256 i = 0; i < agentCount; i++) {
-            Agent memory agent = agents[i];
-            
-            // Skip inactive agents
-            if (!agent.isActive) continue;
-
-            // Check if agent matches search criteria
-            bool matches = false;
-            uint256 rank = 0;
-
-            // Name matches (highest priority - 1000 points)
-            if (_containsIgnoreCase(agent.name, keyword)) {
-                matches = true;
-                rank += 1000;
-            }
-
-            // Description matches (second priority - 500 points)
-            if (_containsIgnoreCase(agent.description, keyword)) {
-                matches = true;
-                rank += 500;
-            }
-
-            // Other fields (100 points each)
-            if (_containsIgnoreCase(agent.address_, keyword)) {
-                matches = true;
-                rank += 100;
-            }
-            if (_containsIgnoreCase(agent.socialLink, keyword)) {
-                matches = true;
-                rank += 100;
-            }
-            if (_containsIgnoreCase(agent.profileUrl, keyword)) {
-                matches = true;
-                rank += 100;
-            }
-            if (_containsIgnoreCase(agent.admin_address, keyword)) {
-                matches = true;
-                rank += 100;
-            }
-
-            // If there's any match, add to results
-            if (matches) {
-                rankedResults[resultIndex] = RankedResult(i, agent, rank);
-                resultIndex++;
-            }
-        }
-
-        // Sort results by rank (bubble sort - can be optimized if needed)
-        for (uint256 i = 0; i < matchCount - 1; i++) {
-            for (uint256 j = 0; j < matchCount - i - 1; j++) {
-                if (rankedResults[j].rank < rankedResults[j + 1].rank) {
-                    RankedResult memory temp = rankedResults[j];
-                    rankedResults[j] = rankedResults[j + 1];
-                    rankedResults[j + 1] = temp;
-                }
-            }
-        }
-
-        // Create final SearchResult array
-        SearchResult[] memory finalResults = new SearchResult[](matchCount);
-        for (uint256 i = 0; i < matchCount; i++) {
-            finalResults[i] = SearchResult(rankedResults[i].id, rankedResults[i].agent);
-        }
-
-        return finalResults;
-    }
-
-    // Update the _containsIgnoreCase function to better handle partial matches
-    function _containsIgnoreCase(string memory source, string memory search) private pure returns (bool) {
-        if (bytes(source).length == 0 || bytes(search).length == 0) {
-            return false;
-        }
-
-        bytes memory sourceBytes = bytes(source);
-        bytes memory searchBytes = bytes(search);
-
-        if (searchBytes.length > sourceBytes.length) return false;
-
-        for (uint256 i = 0; i <= sourceBytes.length - searchBytes.length; i++) {
-            bool found = true;
-            for (uint256 j = 0; j < searchBytes.length; j++) {
-                bytes1 sourceChar = sourceBytes[i + j];
-                bytes1 searchChar = searchBytes[j];
-
-                // Convert both characters to lowercase for comparison
-                uint8 sourceLower = uint8(sourceChar);
-                if (sourceLower >= 65 && sourceLower <= 90) {
-                    sourceLower += 32;
-                }
-                
-                uint8 searchLower = uint8(searchChar);
-                if (searchLower >= 65 && searchLower <= 90) {
-                    searchLower += 32;
-                }
-
-                if (sourceLower != searchLower) {
-                    found = false;
-                    break;
-                }
-            }
-            if (found) return true;
-        }
-        return false;
-    }
-    
-    function _buildSearchResults(uint256[] memory ids) private view returns (SearchResult[] memory) {
-        SearchResult[] memory results = new SearchResult[](ids.length);
+        // Initialize return array with maximum possible size for this page
+        results = new SearchResult[](pageSize);
         uint256 resultCount = 0;
         
-        for (uint256 i = 0; i < ids.length; i++) {
-            if (ids[i] < agentCount && agents[ids[i]].isActive) {
-                results[resultCount] = SearchResult(ids[i], agents[ids[i]]);
+        // Search through agents starting from startIndex
+        for (uint256 i = startIndex; i < agentCount && resultCount < pageSize; i++) {
+            if (!agents[i].isActive) continue;
+            
+            // Simple check - just look at name and description first
+            if (quickContains(agents[i].name, keyword) ||
+                quickContains(agents[i].description, keyword)) {
+                results[resultCount] = SearchResult(i, agents[i]);
                 resultCount++;
             }
         }
+
+        // Create properly sized array for actual results
+        SearchResult[] memory finalResults = new SearchResult[](resultCount);
+        for (uint256 i = 0; i < resultCount; i++) {
+            finalResults[i] = results[i];
+        }
+
+        // Calculate if there are more results and next start index
+        nextStartIndex = startIndex + pageSize;
+        hasMore = nextStartIndex < agentCount;
+
+        return (finalResults, nextStartIndex, hasMore);
+    }
+
+    // Super simple contains function that just checks for exact matches
+    function quickContains(string memory source, string memory searchStr) private pure returns (bool) {
+        bytes memory sourceBytes = bytes(source);
+        bytes memory searchBytes = bytes(searchStr);
         
-        return results;
+        if (searchBytes.length == 0 || sourceBytes.length < searchBytes.length) return false;
+        
+        for (uint i = 0; i < sourceBytes.length - searchBytes.length + 1; i++) {
+            bool isMatch = true;
+            for (uint j = 0; j < searchBytes.length; j++) {
+                if (sourceBytes[i + j] != searchBytes[j]) {
+                    isMatch = false;
+                    break;
+                }
+            }
+            if (isMatch) return true;
+        }
+        return false;
     }
     
     function getAgent(uint256 _id) public view returns (Agent memory) {
