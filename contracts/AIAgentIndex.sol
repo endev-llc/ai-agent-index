@@ -268,7 +268,19 @@ contract AIAgentIndex {
         }
     }
 
-    // New paginated search function
+    function isValidAddress(string memory _addr) internal pure returns (bool) {
+        if (bytes(_addr).length != 42) return false;
+        bytes memory b = bytes(_addr);
+        if (b[0] != "0" || b[1] != "x") return false;
+        for (uint i = 2; i < 42; i++) {
+            bytes1 currentChar = b[i];  // Changed from 'char' to 'currentChar'
+            if (!(currentChar >= "0" && currentChar <= "9") && 
+                !(currentChar >= "a" && currentChar <= "f") &&
+                !(currentChar >= "A" && currentChar <= "F")) return false;
+        }
+        return true;
+    }
+
     function searchPaginated(
         string memory keyword,
         uint256 startIndex,
@@ -281,17 +293,25 @@ contract AIAgentIndex {
         require(pageSize > 0 && pageSize <= 50, "Invalid page size");
         require(startIndex <= agentCount, "Start index out of bounds");
 
-        // Initialize return array with maximum possible size for this page
         results = new SearchResult[](pageSize);
         uint256 resultCount = 0;
         
-        // Search through agents starting from startIndex
+        // Check if search term is an address (for admin_address search)
+        bool isAddressSearch = isValidAddress(keyword);
+
         for (uint256 i = startIndex; i < agentCount && resultCount < pageSize; i++) {
             if (!agents[i].isActive) continue;
             
-            // Simple check - just look at name and description first
+            // Check all searchable fields
             if (quickContains(agents[i].name, keyword) ||
-                quickContains(agents[i].description, keyword)) {
+                quickContains(agents[i].address_, keyword) ||
+                quickContains(agents[i].socialLink, keyword) ||
+                quickContains(agents[i].profileUrl, keyword) ||
+                quickContains(agents[i].description, keyword) ||
+                quickContains(agents[i].admin_address, keyword) ||
+                (isAddressSearch && 
+                 keccak256(abi.encodePacked(toLowerCase(agents[i].admin_address))) == 
+                 keccak256(abi.encodePacked(toLowerCase(keyword))))) {
                 results[resultCount] = SearchResult(i, agents[i]);
                 resultCount++;
             }
@@ -303,11 +323,23 @@ contract AIAgentIndex {
             finalResults[i] = results[i];
         }
 
-        // Calculate if there are more results and next start index
         nextStartIndex = startIndex + pageSize;
         hasMore = nextStartIndex < agentCount;
 
         return (finalResults, nextStartIndex, hasMore);
+    }
+
+    function toLowerCase(string memory _str) internal pure returns (string memory) {
+        bytes memory bStr = bytes(_str);
+        bytes memory bLower = new bytes(bStr.length);
+        for (uint i = 0; i < bStr.length; i++) {
+            if ((uint8(bStr[i]) >= 65) && (uint8(bStr[i]) <= 90)) {
+                bLower[i] = bytes1(uint8(bStr[i]) + 32);
+            } else {
+                bLower[i] = bStr[i];
+            }
+        }
+        return string(bLower);
     }
 
     // Super simple contains function that just checks for exact matches
@@ -328,6 +360,44 @@ contract AIAgentIndex {
             if (isMatch) return true;
         }
         return false;
+    }
+
+    // Separate function specifically for fetching agents by owner
+    function getAgentsByOwner(
+        address ownerAddress,
+        uint256 startIndex,
+        uint256 pageSize
+    ) public view returns (
+        SearchResult[] memory results,
+        uint256 nextStartIndex,
+        bool hasMore
+    ) {
+        require(pageSize > 0 && pageSize <= 50, "Invalid page size");
+        require(startIndex <= agentCount, "Start index out of bounds");
+
+        // Initialize return array with maximum possible size for this page
+        results = new SearchResult[](pageSize);
+        uint256 resultCount = 0;
+        
+        // Search through agents starting from startIndex
+        for (uint256 i = startIndex; i < agentCount && resultCount < pageSize; i++) {
+            if (agents[i].owner == ownerAddress) {
+                results[resultCount] = SearchResult(i, agents[i]);
+                resultCount++;
+            }
+        }
+
+        // Create properly sized array for actual results
+        SearchResult[] memory finalResults = new SearchResult[](resultCount);
+        for (uint256 i = 0; i < resultCount; i++) {
+            finalResults[i] = results[i];
+        }
+
+        // Calculate if there are more results and next start index
+        nextStartIndex = startIndex + pageSize;
+        hasMore = nextStartIndex < agentCount;
+
+        return (finalResults, nextStartIndex, hasMore);
     }
     
     function getAgent(uint256 _id) public view returns (Agent memory) {

@@ -96,10 +96,21 @@
 
         <!-- Manage Agents Modal -->
         <div id="manageAgentsModal" class="fixed inset-0 bg-black bg-opacity-50 hidden">
-            <div class="bg-white rounded-lg max-w-4xl mx-auto mt-20 p-6">
+            <div class="bg-white rounded-lg max-w-4xl mx-auto mt-20 p-6 max-h-[80vh] overflow-y-auto">
                 <h2 class="text-2xl font-bold mb-4">Manage Your AI Agents</h2>
                 <div id="userAgentsList" class="space-y-4"></div>
-                <button onclick="closeModal('manageAgentsModal')" class="mt-4 bg-gray-200 px-4 py-2 rounded-md hover:bg-gray-300">Close</button>
+                <div id="loadMoreUserAgents" class="text-center mt-6 hidden">
+                    <button onclick="loadUserAgents(false)" 
+                        class="bg-gray-100 text-gray-700 px-6 py-2 rounded-full hover:bg-gray-200 transition-colors">
+                        Load More
+                    </button>
+                </div>
+                <div class="mt-6 text-center">
+                    <button onclick="closeModal('manageAgentsModal')" 
+                        class="bg-gray-200 px-6 py-2 rounded-full hover:bg-gray-300 transition-colors">
+                        Close
+                    </button>
+                </div>
             </div>
         </div>
 
@@ -151,6 +162,7 @@
             "function transferAgentAdmin(uint256 _agentId, address _newAdmin) public",
             "function acceptAgentAdmin(uint256 _agentId) public",
             "function cancelAdminTransfer(uint256 _agentId) public",
+            "function getAgentsByOwner(address ownerAddress, uint256 startIndex, uint256 pageSize) public view returns (tuple(uint256 id, tuple(string name, string address_, string socialLink, string profileUrl, string description, bool isActive, uint256 addedAt, address owner, uint256 lastUpdateTime, string admin_address) agent)[] memory results, uint256 nextStartIndex, bool hasMore)",
             "function listingFee() public view returns (uint256)"
         ];
 
@@ -161,6 +173,11 @@
         let currentKeyword = '';
         let isSearching = false;
         let userAddress = null;
+
+        // State for managing user agents pagination
+        let userAgentsNextStartIndex = 0;
+        let isLoadingUserAgents = false;
+        const USER_AGENTS_PAGE_SIZE = 10;
 
         // DOM Elements
         const connectWalletBtn = document.getElementById('connectWallet');
@@ -340,52 +357,99 @@
             }
         }
 
-        // Manage Agents Functions
-        async function loadUserAgents() {
+        // Load User Agents with Pagination
+        // Keep track of all found user agents
+        let allUserAgents = [];
+        let hasMoreAgentsToLoad = true;
+        let currentIndex = 0;
+
+        async function loadUserAgents(reset = true) {
             if (!userAddress) {
                 alert('Please connect your wallet first!');
                 return;
             }
 
+            if (isLoadingUserAgents) return;
+            isLoadingUserAgents = true;
+
             const userAgentsList = document.getElementById('userAgentsList');
-            userAgentsList.innerHTML = '<div class="text-center">Loading your agents...</div>';
+            const loadMoreUserAgentsBtn = document.getElementById('loadMoreUserAgents');
+            
+            if (reset) {
+                userAgentsNextStartIndex = 0;
+                userAgentsList.innerHTML = '<div class="text-center">Loading your agents...</div>';
+            }
 
             try {
-                // We'll search through all agents and filter for the ones owned by the user
-                const [results, _, __] = await contract.searchPaginated('', 0, 1000);
-                const userAgents = results.filter(result => 
-                    result.agent.owner.toLowerCase() === userAddress.toLowerCase()
+                // Use the new getAgentsByOwner function instead of searchPaginated
+                const [results, nextStartIndex, hasMore] = await contract.getAgentsByOwner(
+                    userAddress,
+                    userAgentsNextStartIndex,
+                    USER_AGENTS_PAGE_SIZE
                 );
 
-                if (userAgents.length === 0) {
+                if (reset && results.length === 0) {
                     userAgentsList.innerHTML = '<div class="text-center text-gray-500">You don\'t have any agents yet.</div>';
+                    loadMoreUserAgentsBtn.classList.add('hidden');
                     return;
                 }
 
-                userAgentsList.innerHTML = '';
-                userAgents.forEach(result => {
+                if (reset) {
+                    userAgentsList.innerHTML = '';
+                }
+
+                // No need to filter results as they're already filtered by owner in the smart contract
+                results.forEach(result => {
                     const agent = result.agent;
                     const agentElement = document.createElement('div');
-                    agentElement.className = 'border rounded-lg p-4 space-y-2';
+                    agentElement.className = 'border rounded-lg p-4 space-y-2 bg-white shadow-sm hover:shadow-md transition-shadow';
                     agentElement.innerHTML = `
                         <div class="flex justify-between items-start">
-                            <h3 class="font-medium">${agent.name}</h3>
-                            <div class="space-x-2">
-                                <button onclick="editAgent(${result.id})" class="text-blue-500 hover:text-blue-600">Edit</button>
-                                ${agent.isActive ?
-                                    `<button onclick="deactivateAgent(${result.id})" class="text-red-500 hover:text-red-600">Deactivate</button>` :
-                                    `<button onclick="reactivateAgent(${result.id})" class="text-green-500 hover:text-green-600">Reactivate</button>`
-                                }
-                                <button onclick="initiateAdminTransfer(${result.id})" class="text-purple-500 hover:text-purple-600">Transfer Admin</button>
+                            <div>
+                                <h3 class="font-medium text-lg">${agent.name}</h3>
+                                <p class="text-sm text-gray-500">${agent.address_}</p>
                             </div>
+                            <span class="${agent.isActive ? 'text-green-500' : 'text-red-500'} text-sm font-medium">
+                                ${agent.isActive ? 'Active' : 'Inactive'}
+                            </span>
                         </div>
                         <p class="text-sm text-gray-600">${agent.description}</p>
+                        <div class="flex justify-end gap-2 pt-2">
+                            <button onclick="editAgent(${result.id})" 
+                                class="px-3 py-1 bg-blue-50 text-blue-600 rounded hover:bg-blue-100 transition-colors">
+                                Edit
+                            </button>
+                            ${agent.isActive ?
+                                `<button onclick="deactivateAgent(${result.id})" 
+                                    class="px-3 py-1 bg-red-50 text-red-600 rounded hover:bg-red-100 transition-colors">
+                                    Deactivate
+                                </button>` :
+                                `<button onclick="reactivateAgent(${result.id})" 
+                                    class="px-3 py-1 bg-green-50 text-green-600 rounded hover:bg-green-100 transition-colors">
+                                    Reactivate
+                                </button>`
+                            }
+                            <button onclick="initiateAdminTransfer(${result.id})" 
+                                class="px-3 py-1 bg-purple-50 text-purple-600 rounded hover:bg-purple-100 transition-colors">
+                                Transfer Admin
+                            </button>
+                        </div>
                     `;
                     userAgentsList.appendChild(agentElement);
                 });
+
+                userAgentsNextStartIndex = nextStartIndex;
+                loadMoreUserAgentsBtn.classList.toggle('hidden', !hasMore);
+                
             } catch (error) {
                 console.error('Error loading user agents:', error);
-                userAgentsList.innerHTML = '<div class="text-center text-red-500">Error loading your agents. Please try again.</div>';
+                if (reset) {
+                    userAgentsList.innerHTML = '<div class="text-center text-red-500">Error loading your agents. Please try again.</div>';
+                } else {
+                    alert('Error loading more agents. Please try again.');
+                }
+            } finally {
+                isLoadingUserAgents = false;
             }
         }
 
