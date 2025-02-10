@@ -63,6 +63,19 @@ export class Agent extends Entity {
     this.set("name", Value.fromString(value));
   }
 
+  get description(): string {
+    let value = this.get("description");
+    if (!value || value.kind == ValueKind.NULL) {
+      throw new Error("Cannot return null for a required field.");
+    } else {
+      return value.toString();
+    }
+  }
+
+  set description(value: string) {
+    this.set("description", Value.fromString(value));
+  }
+
   get address(): string {
     let value = this.get("address");
     if (!value || value.kind == ValueKind.NULL) {
@@ -100,19 +113,6 @@ export class Agent extends Entity {
 
   set profileUrl(value: string) {
     this.set("profileUrl", Value.fromString(value));
-  }
-
-  get description(): string {
-    let value = this.get("description");
-    if (!value || value.kind == ValueKind.NULL) {
-      throw new Error("Cannot return null for a required field.");
-    } else {
-      return value.toString();
-    }
-  }
-
-  set description(value: string) {
-    this.set("description", Value.fromString(value));
   }
 
   get isActive(): boolean {
@@ -180,8 +180,8 @@ export class Agent extends Entity {
     this.set("adminAddress", Value.fromString(value));
   }
 
-  get nameSearchText(): string {
-    let value = this.get("nameSearchText");
+  get searchText(): string {
+    let value = this.get("searchText");
     if (!value || value.kind == ValueKind.NULL) {
       throw new Error("Cannot return null for a required field.");
     } else {
@@ -189,33 +189,20 @@ export class Agent extends Entity {
     }
   }
 
-  set nameSearchText(value: string) {
-    this.set("nameSearchText", Value.fromString(value));
+  set searchText(value: string) {
+    this.set("searchText", Value.fromString(value));
   }
 
-  get descriptionSearchText(): string {
-    let value = this.get("descriptionSearchText");
+  get searchScore(): i32 {
+    let value = this.get("searchScore");
     if (!value || value.kind == ValueKind.NULL) {
-      throw new Error("Cannot return null for a required field.");
+      return 0;
     } else {
-      return value.toString();
+      return value.toI32();
     }
   }
 
-  set descriptionSearchText(value: string) {
-    this.set("descriptionSearchText", Value.fromString(value));
-  }
-
-  get otherSearchText(): string {
-    let value = this.get("otherSearchText");
-    if (!value || value.kind == ValueKind.NULL) {
-      throw new Error("Cannot return null for a required field.");
-    } else {
-      return value.toString();
-    }
-  }
-
-  set otherSearchText(value: string) {
-    this.set("otherSearchText", Value.fromString(value));
+  set searchScore(value: i32) {
+    this.set("searchScore", Value.fromI32(value));
   }
 }

@@ -8,12 +8,37 @@ import {
 } from "../generated/AIAgentIndex/AIAgentIndex"
 import { Agent } from "../generated/schema"
 
+function createSearchText(
+  name: string,
+  description: string,
+  address: string,
+  socialLink: string,
+  profileUrl: string,
+  adminAddress: string
+): string {
+  return [name, description, address, socialLink, profileUrl, adminAddress]
+    .join(" ")
+    .toLowerCase()
+}
+
 export function handleAgentAdded(event: AgentAdded): void {
   let contract = AIAgentIndex.bind(event.address)
   let agentData = contract.getAgent(event.params.id)
   let agent = new Agent(event.params.id.toString())
   
   updateAgentFields(agent, agentData)
+  
+  // Add search functionality
+  agent.searchText = createSearchText(
+    agent.name,
+    agent.description,
+    agent.address,
+    agent.socialLink,
+    agent.profileUrl,
+    agent.adminAddress
+  )
+  agent.searchScore = 0
+  
   agent.save()
 }
 
@@ -23,6 +48,18 @@ export function handleAgentUpdated(event: AgentUpdated): void {
     let contract = AIAgentIndex.bind(event.address)
     let agentData = contract.getAgent(event.params.id)
     updateAgentFields(agent, agentData)
+    
+    // Update search text
+    agent.searchText = createSearchText(
+      agent.name,
+      agent.description,
+      agent.address,
+      agent.socialLink,
+      agent.profileUrl,
+      agent.adminAddress
+    )
+    agent.searchScore = 0
+    
     agent.save()
   }
 }
@@ -54,12 +91,4 @@ function updateAgentFields(agent: Agent, data: ethereum.Tuple): void {
   agent.owner = data[7].toAddress()
   agent.lastUpdateTime = data[8].toBigInt()
   agent.adminAddress = data[9].toString()
-  
-  // Set weighted search fields
-  agent.nameSearchText = data[0].toString().toLowerCase()
-  agent.descriptionSearchText = data[4].toString().toLowerCase()
-  agent.otherSearchText = data[1].toString().toLowerCase() + " " + 
-                         data[2].toString().toLowerCase() + " " + 
-                         data[3].toString().toLowerCase() + " " + 
-                         data[9].toString().toLowerCase()
 }
