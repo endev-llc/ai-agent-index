@@ -1,0 +1,30 @@
+specVersion: 0.0.5
+schema:
+  file: ./schema.graphql
+dataSources:
+  - kind: ethereum
+    name: AIAgentIndex
+    network: base-sepolia
+    source:
+      address: "0xDe438021611C7878ECeb271FCEF15Fc12890019f"
+      abi: AIAgentIndex
+      startBlock: 21000000
+    mapping:
+      kind: ethereum/events
+      apiVersion: 0.0.7
+      language: wasm/assemblyscript
+      entities:
+        - Agent
+      abis:
+        - name: AIAgentIndex
+          file: ./abis/AIAgentIndex.json
+      eventHandlers:
+        - event: AgentAdded(indexed uint256,string,uint256,indexed address)
+          handler: handleAgentAdded
+        - event: AgentUpdated(indexed uint256,string,indexed address)
+          handler: handleAgentUpdated
+        - event: AgentDeactivated(indexed uint256,indexed address)
+          handler: handleAgentDeactivated
+        - event: AgentReactivated(indexed uint256,indexed address)
+          handler: handleAgentReactivated
+      file: ./src/mapping.ts

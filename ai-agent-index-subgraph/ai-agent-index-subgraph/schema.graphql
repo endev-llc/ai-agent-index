@@ -1,0 +1,16 @@
+type Agent @entity {
+  id: ID!
+  name: String!
+  address: String!
+  socialLink: String!
+  profileUrl: String!
+  description: String!
+  isActive: Boolean!
+  addedAt: BigInt!
+  owner: Bytes!
+  lastUpdateTime: BigInt!
+  adminAddress: String!
+  nameSearchText: String!
+  descriptionSearchText: String!
+  otherSearchText: String!
+}
