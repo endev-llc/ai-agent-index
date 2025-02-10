@@ -29,7 +29,7 @@ async function main() {
         }
     }
 
-    // Also check the most recently added agents
+    // Also check the most recently added agents.
     if (agentCount > 5) {
         console.log('\nChecking most recent agents...');
         for(let i = Number(agentCount) - 3; i < Number(agentCount); i++) {
