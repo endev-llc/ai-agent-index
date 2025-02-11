@@ -21,6 +21,35 @@ function createSearchText(
     .toLowerCase()
 }
 
+function calculateSearchScore(
+  searchTerm: string,
+  name: string,
+  description: string,
+  address: string,
+  socialLink: string,
+  profileUrl: string,
+  adminAddress: string
+): BigInt {  // Change return type to BigInt
+  let score = BigInt.fromI32(0);  // Initialize as BigInt
+  let lowercaseSearchTerm = searchTerm.toLowerCase();
+  
+  // Highest priority: name matches (score: 100)
+  if (name.toLowerCase().includes(lowercaseSearchTerm)) {
+    score = score.plus(BigInt.fromI32(100));
+  }
+  // Second priority: description matches (score: 50)
+  if (description.toLowerCase().includes(lowercaseSearchTerm)) {
+    score = score.plus(BigInt.fromI32(50));
+  }
+  // Third priority: other fields matches (score: 25)
+  let otherFields = [address, socialLink, profileUrl, adminAddress].join(" ").toLowerCase();
+  if (otherFields.includes(lowercaseSearchTerm)) {
+    score = score.plus(BigInt.fromI32(25));
+  }
+  
+  return score;
+}
+
 export function handleAgentAdded(event: AgentAdded): void {
   let contract = AIAgentIndex.bind(event.address)
   let agentData = contract.getAgent(event.params.id)
@@ -37,7 +66,17 @@ export function handleAgentAdded(event: AgentAdded): void {
     agent.profileUrl,
     agent.adminAddress
   )
-  agent.searchScore = 0
+  
+  // Calculate initial search score (will be updated during searches)
+  agent.searchScore = calculateSearchScore(
+    "", // Empty search term for initial state
+    agent.name,
+    agent.description,
+    agent.address,
+    agent.socialLink,
+    agent.profileUrl,
+    agent.adminAddress
+  )
   
   agent.save()
 }
@@ -58,7 +97,17 @@ export function handleAgentUpdated(event: AgentUpdated): void {
       agent.profileUrl,
       agent.adminAddress
     )
-    agent.searchScore = 0
+    
+    // Recalculate search score
+    agent.searchScore = calculateSearchScore(
+      "", // Empty search term for initial state
+      agent.name,
+      agent.description,
+      agent.address,
+      agent.socialLink,
+      agent.profileUrl,
+      agent.adminAddress
+    )
     
     agent.save()
   }
