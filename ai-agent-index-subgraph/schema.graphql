@@ -11,5 +11,5 @@ type Agent @entity {
   lastUpdateTime: BigInt!
   adminAddress: String!
   searchText: String!
-  searchScore: BigInt!
+  searchScore: Int!
 }

@@ -193,16 +193,16 @@ export class Agent extends Entity {
     this.set("searchText", Value.fromString(value));
   }
 
-  get searchScore(): BigInt {
+  get searchScore(): i32 {
     let value = this.get("searchScore");
     if (!value || value.kind == ValueKind.NULL) {
-      throw new Error("Cannot return null for a required field.");
+      return 0;
     } else {
-      return value.toBigInt();
+      return value.toI32();
     }
   }
 
-  set searchScore(value: BigInt) {
-    this.set("searchScore", Value.fromBigInt(value));
+  set searchScore(value: i32) {
+    this.set("searchScore", Value.fromI32(value));
   }
 }
