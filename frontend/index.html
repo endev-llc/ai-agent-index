@@ -153,7 +153,6 @@
         // Contract configuration
         const contractAddress = '0xDe438021611C7878ECeb271FCEF15Fc12890019f';
         const contractABI = [
-            "function searchPaginated(string memory keyword, uint256 startIndex, uint256 pageSize) public view returns (tuple(uint256 id, tuple(string name, string address_, string socialLink, string profileUrl, string description, bool isActive, uint256 addedAt, address owner, uint256 lastUpdateTime, string admin_address) agent)[] memory results, uint256 nextStartIndex, bool hasMore)",
             "function addAgent(string memory _name, string memory _address, string memory _socialLink, string memory _profileUrl, string memory _description, string memory _admin_address) public payable returns (uint256)",
             "function updateAgent(uint256 _id, string memory _name, string memory _address, string memory _socialLink, string memory _profileUrl, string memory _description) public",
             "function deactivateAgent(uint256 _id) public",
@@ -166,10 +165,13 @@
             "function listingFee() public view returns (uint256)"
         ];
 
+        // TheGraph API configuration
+        const GRAPH_API_URL = 'https://api.studio.thegraph.com/query/103943/ai-agent-index/version/latest';
+
         let provider;
         let signer;
         let contract;
-        let currentNextStartIndex = 0;
+        let currentSkip = 0;
         let currentKeyword = '';
         let isSearching = false;
         let userAddress = null;
@@ -234,14 +236,14 @@
         }
 
         // Search Functions
-        async function performSearch(newSearch) {
+        async function performSearch(newSearch = true) {
             if (isSearching) return;
             isSearching = true;
 
             try {
                 const keyword = searchInput.value.trim();
                 if (newSearch) {
-                    currentNextStartIndex = 0;
+                    currentSkip = 0;
                     resultsDiv.innerHTML = '';
                     currentKeyword = keyword;
                 }
@@ -249,15 +251,48 @@
                 loadingDiv.classList.remove('hidden');
                 loadMoreDiv.classList.add('hidden');
 
-                const [results, nextStartIndex, hasMore] = await contract.searchPaginated(
-                    currentKeyword,
-                    currentNextStartIndex,
-                    10
-                );
+                const query = `{
+                    agents(
+                        where: {
+                            searchText_contains_nocase: "${currentKeyword}",
+                            isActive: true
+                        },
+                        skip: ${currentSkip},
+                        first: 10,
+                        orderBy: searchScore,
+                        orderDirection: desc
+                    ) {
+                        id
+                        name
+                        description
+                        address
+                        socialLink
+                        profileUrl
+                        isActive
+                        addedAt
+                        owner
+                        lastUpdateTime
+                        adminAddress
+                        searchScore
+                    }
+                }`;
+
+                const response = await fetch(GRAPH_API_URL, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({ query })
+                });
+
+                const json = await response.json();
+                const results = json.data.agents;
 
                 displayResults(results);
-                currentNextStartIndex = nextStartIndex;
-                loadMoreDiv.classList.toggle('hidden', !hasMore);
+                currentSkip += results.length;
+                
+                // Show/hide load more button if we got a full page of results
+                loadMoreDiv.classList.toggle('hidden', results.length < 10);
             } catch (error) {
                 console.error('Search error:', error);
                 alert('Error performing search');
@@ -268,8 +303,7 @@
         }
 
         function displayResults(results) {
-            results.forEach(result => {
-                const agent = result.agent;
+            results.forEach(agent => {
                 const resultElement = document.createElement('div');
                 resultElement.className = 'bg-white rounded-lg shadow-md p-6 hover:shadow-lg transition-shadow';
                 
@@ -279,7 +313,7 @@
                     <div class="flex justify-between items-start mb-4">
                         <div>
                             <h2 class="text-xl font-semibold text-gray-800 mb-1">${agent.name}</h2>
-                            <div class="text-gray-500 font-medium">${agent.address_}</div>
+                            <div class="text-gray-500 font-medium">${agent.address}</div>
                         </div>
                         <div class="flex items-center">
                             ${agent.isActive ? 
@@ -315,7 +349,7 @@
                             <svg class="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"></path>
                             </svg>
-                            Admin: ${agent.admin_address ? agent.admin_address.slice(0, 6) + '...' + agent.admin_address.slice(-4) : 'N/A'}
+                            Admin: ${agent.adminAddress ? agent.adminAddress.slice(0, 6) + '...' + agent.adminAddress.slice(-4) : 'N/A'}
                         </div>
                     </div>
                 `;
