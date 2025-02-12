@@ -157,11 +157,9 @@
             "function updateAgent(uint256 _id, string memory _name, string memory _address, string memory _socialLink, string memory _profileUrl, string memory _description) public",
             "function deactivateAgent(uint256 _id) public",
             "function reactivateAgent(uint256 _id) public payable",
-            "function getAgent(uint256 _id) public view returns (tuple(string name, string address_, string socialLink, string profileUrl, string description, bool isActive, uint256 addedAt, address owner, uint256 lastUpdateTime, string admin_address))",
             "function transferAgentAdmin(uint256 _agentId, address _newAdmin) public",
             "function acceptAgentAdmin(uint256 _agentId) public",
             "function cancelAdminTransfer(uint256 _agentId) public",
-            "function getAgentsByOwner(address ownerAddress, uint256 startIndex, uint256 pageSize) public view returns (tuple(uint256 id, tuple(string name, string address_, string socialLink, string profileUrl, string description, bool isActive, uint256 addedAt, address owner, uint256 lastUpdateTime, string admin_address) agent)[] memory results, uint256 nextStartIndex, bool hasMore)",
             "function listingFee() public view returns (uint256)"
         ];
 
@@ -415,12 +413,38 @@
             }
 
             try {
-                // Use the new getAgentsByOwner function instead of searchPaginated
-                const [results, nextStartIndex, hasMore] = await contract.getAgentsByOwner(
-                    userAddress,
-                    userAgentsNextStartIndex,
-                    USER_AGENTS_PAGE_SIZE
-                );
+                const query = `{
+                    agents(
+                        where: { owner: "${userAddress.toLowerCase()}" }
+                        skip: ${userAgentsNextStartIndex}
+                        first: ${USER_AGENTS_PAGE_SIZE}
+                        orderBy: addedAt
+                        orderDirection: desc
+                    ) {
+                        id
+                        name
+                        description
+                        address
+                        socialLink
+                        profileUrl
+                        isActive
+                        addedAt
+                        owner
+                        lastUpdateTime
+                        adminAddress
+                    }
+                }`;
+
+                const response = await fetch(GRAPH_API_URL, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({ query })
+                });
+
+                const json = await response.json();
+                const results = json.data.agents;
 
                 if (reset && results.length === 0) {
                     userAgentsList.innerHTML = '<div class="text-center text-gray-500">You don\'t have any agents yet.</div>';
@@ -432,16 +456,14 @@
                     userAgentsList.innerHTML = '';
                 }
 
-                // No need to filter results as they're already filtered by owner in the smart contract
-                results.forEach(result => {
-                    const agent = result.agent;
+                results.forEach(agent => {
                     const agentElement = document.createElement('div');
                     agentElement.className = 'border rounded-lg p-4 space-y-2 bg-white shadow-sm hover:shadow-md transition-shadow';
                     agentElement.innerHTML = `
                         <div class="flex justify-between items-start">
                             <div>
                                 <h3 class="font-medium text-lg">${agent.name}</h3>
-                                <p class="text-sm text-gray-500">${agent.address_}</p>
+                                <p class="text-sm text-gray-500">${agent.address}</p>
                             </div>
                             <span class="${agent.isActive ? 'text-green-500' : 'text-red-500'} text-sm font-medium">
                                 ${agent.isActive ? 'Active' : 'Inactive'}
@@ -449,21 +471,21 @@
                         </div>
                         <p class="text-sm text-gray-600">${agent.description}</p>
                         <div class="flex justify-end gap-2 pt-2">
-                            <button onclick="editAgent(${result.id})" 
+                            <button onclick="editAgent(${agent.id})" 
                                 class="px-3 py-1 bg-blue-50 text-blue-600 rounded hover:bg-blue-100 transition-colors">
                                 Edit
                             </button>
                             ${agent.isActive ?
-                                `<button onclick="deactivateAgent(${result.id})" 
+                                `<button onclick="deactivateAgent(${agent.id})" 
                                     class="px-3 py-1 bg-red-50 text-red-600 rounded hover:bg-red-100 transition-colors">
                                     Deactivate
                                 </button>` :
-                                `<button onclick="reactivateAgent(${result.id})" 
+                                `<button onclick="reactivateAgent(${agent.id})" 
                                     class="px-3 py-1 bg-green-50 text-green-600 rounded hover:bg-green-100 transition-colors">
                                     Reactivate
                                 </button>`
                             }
-                            <button onclick="initiateAdminTransfer(${result.id})" 
+                            <button onclick="initiateAdminTransfer(${agent.id})" 
                                 class="px-3 py-1 bg-purple-50 text-purple-600 rounded hover:bg-purple-100 transition-colors">
                                 Transfer Admin
                             </button>
@@ -472,8 +494,8 @@
                     userAgentsList.appendChild(agentElement);
                 });
 
-                userAgentsNextStartIndex = nextStartIndex;
-                loadMoreUserAgentsBtn.classList.toggle('hidden', !hasMore);
+                userAgentsNextStartIndex += results.length;
+                loadMoreUserAgentsBtn.classList.toggle('hidden', results.length < USER_AGENTS_PAGE_SIZE);
                 
             } catch (error) {
                 console.error('Error loading user agents:', error);
@@ -487,14 +509,38 @@
             }
         }
 
-        // Agent Management Functions
+        // Edit Agent - now using TheGraph
         async function editAgent(agentId) {
             try {
-                const agent = await contract.getAgent(agentId);
+                const query = `{
+                    agent(id: "${agentId}") {
+                        name
+                        address
+                        socialLink
+                        profileUrl
+                        description
+                    }
+                }`;
+
+                const response = await fetch(GRAPH_API_URL, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({ query })
+                });
+
+                const json = await response.json();
+                const agent = json.data.agent;
+
+                if (!agent) {
+                    throw new Error('Agent not found');
+                }
+
                 const form = document.getElementById('editAgentForm');
                 form.elements['agentId'].value = agentId;
                 form.elements['name'].value = agent.name;
-                form.elements['address'].value = agent.address_;
+                form.elements['address'].value = agent.address;
                 form.elements['socialLink'].value = agent.socialLink;
                 form.elements['profileUrl'].value = agent.profileUrl;
                 form.elements['description'].value = agent.description;
