@@ -4,6 +4,8 @@ import {
   AgentUpdated,
   AgentDeactivated,
   AgentReactivated,
+  AdminTransferRequested,
+  AdminTransferred,
   AIAgentIndex
 } from "../generated/AIAgentIndex/AIAgentIndex"
 import { Agent } from "../generated/schema"
@@ -28,7 +30,6 @@ export function handleAgentAdded(event: AgentAdded): void {
   
   updateAgentFields(agent, agentData)
   
-  // Add search functionality here
   agent.searchText = createSearchText(
     agent.name,
     agent.description,
@@ -49,7 +50,6 @@ export function handleAgentUpdated(event: AgentUpdated): void {
     let agentData = contract.getAgent(event.params.id)
     updateAgentFields(agent, agentData)
     
-    // Update search text
     agent.searchText = createSearchText(
       agent.name,
       agent.description,
@@ -76,6 +76,39 @@ export function handleAgentReactivated(event: AgentReactivated): void {
   let agent = Agent.load(event.params.id.toString())
   if (agent) {
     agent.isActive = true
+    agent.save()
+  }
+}
+
+// New handler for admin transfer request
+export function handleAdminTransferRequested(event: AdminTransferRequested): void {
+  let agent = Agent.load(event.params.agentId.toString())
+  if (agent) {
+    // Update the timestamp to mark that a transfer is in progress
+    agent.lastUpdateTime = event.block.timestamp
+    // Could add a pendingAdmin field to schema if needed
+    agent.save()
+  }
+}
+
+// New handler for completed admin transfer
+export function handleAdminTransferred(event: AdminTransferred): void {
+  let agent = Agent.load(event.params.agentId.toString())
+  if (agent) {
+    // Update the admin address with the new admin
+    agent.adminAddress = event.params.newAdmin.toHexString()
+    agent.lastUpdateTime = event.block.timestamp
+    
+    // Update search text to include new admin address
+    agent.searchText = createSearchText(
+      agent.name,
+      agent.description,
+      agent.address,
+      agent.socialLink,
+      agent.profileUrl,
+      agent.adminAddress
+    )
+    
     agent.save()
   }
 }

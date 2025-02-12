@@ -27,4 +27,8 @@ dataSources:
           handler: handleAgentDeactivated
         - event: AgentReactivated(indexed uint256,indexed address)
           handler: handleAgentReactivated
+        - event: AdminTransferRequested(indexed uint256,indexed address,indexed address)
+          handler: handleAdminTransferRequested
+        - event: AdminTransferred(indexed uint256,indexed address,indexed address)
+          handler: handleAdminTransferred
       file: AIAgentIndex/AIAgentIndex.wasm
