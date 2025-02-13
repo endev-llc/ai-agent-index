@@ -18,6 +18,7 @@ import os
 from dotenv import load_dotenv
 import requests
 from flask import Flask, request, jsonify
+from flask_cors import CORS
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
 
@@ -25,6 +26,7 @@ from sklearn.metrics.pairwise import cosine_similarity
 load_dotenv()
 
 app = Flask(__name__)
+CORS(app)
 
 # Environment variable for your subgraph endpoint on The Graph
 SUBGRAPH_URL = os.environ.get("SUBGRAPH_URL", "")

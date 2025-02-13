@@ -239,58 +239,29 @@
             isSearching = true;
 
             try {
-                const keyword = searchInput.value.trim();
+                const currentKeyword = searchInput.value.trim();
                 if (newSearch) {
                     currentSkip = 0;
                     resultsDiv.innerHTML = '';
-                    currentKeyword = keyword;
                 }
 
                 loadingDiv.classList.remove('hidden');
                 loadMoreDiv.classList.add('hidden');
 
-                const query = `{
-                    agents(
-                        where: {
-                            searchText_contains_nocase: "${currentKeyword}",
-                            isActive: true
-                        },
-                        skip: ${currentSkip},
-                        first: 10,
-                        orderBy: searchScore,
-                        orderDirection: desc
-                    ) {
-                        id
-                        name
-                        description
-                        address
-                        socialLink
-                        profileUrl
-                        isActive
-                        addedAt
-                        owner
-                        lastUpdateTime
-                        adminAddress
-                        searchScore
-                    }
-                }`;
-
-                const response = await fetch(GRAPH_API_URL, {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                    },
-                    body: JSON.stringify({ query })
-                });
-
-                const json = await response.json();
-                const results = json.data.agents;
-
-                displayResults(results);
-                currentSkip += results.length;
+                // Call your local API endpoint
+                const response = await fetch(`http://localhost:5001/search?q=${encodeURIComponent(currentKeyword)}`);
                 
-                // Show/hide load more button if we got a full page of results
-                loadMoreDiv.classList.toggle('hidden', results.length < 10);
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+
+                const results = await response.json();
+                
+                displayResults(results);
+                
+                // Since the Python API handles pagination differently, we'll hide the load more button
+                loadMoreDiv.classList.add('hidden');
+
             } catch (error) {
                 console.error('Search error:', error);
                 alert('Error performing search');
