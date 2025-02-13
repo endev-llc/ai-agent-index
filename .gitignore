@@ -19,3 +19,31 @@ ignition/deployments/chain-31337
 data/agents.csv
 
 upload_progress.json
+
+# Python virtual environment
+search-api/venv/
+search-api/__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.py[cod]
+*$py.class
+
+# Python environment variables
+search-api/.env
+
+# Python package directories
+*.egg
+*.egg-info/
+dist/
+build/
+eggs/
+parts/
+bin/
+var/
+sdist/
+develop-eggs/
+.installed.cfg
+lib/
+lib64/
