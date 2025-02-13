@@ -15,10 +15,14 @@ Configuration:
 """
 
 import os
+from dotenv import load_dotenv
 import requests
 from flask import Flask, request, jsonify
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
+
+# Load environment variables from .env file
+load_dotenv()
 
 app = Flask(__name__)
 
