@@ -47,10 +47,9 @@ def fetch_agents_from_subgraph(search_term):
     while True:
         # GraphQL query to your subgraph:
         graphql_query = """
-        query ($term: String!, $first: Int!, $skip: Int!) {
+        query ($first: Int!, $skip: Int!) {
           agents(
             where: {
-              searchText_contains_nocase: $term,
               isActive: true
             },
             orderBy: name,
