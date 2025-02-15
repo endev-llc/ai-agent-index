@@ -7,10 +7,10 @@ Flow:
   2. The API queries your subgraph for agents whose 'isActive' is true
      in batches (max 1000 per query).
   3. For each agent, two scores are computed:
-       a) A TF‑IDF cosine similarity score (using a weighted combination of fields).
-       b) A weighted substring frequency score (using simple counts in each field).
-  4. Each score set is normalized to a 0–1 range and combined equally
-     (50% each) into a final ranking score.
+       a) A TF‑IDF cosine similarity score computed on a weighted combination of fields.
+       b) A weighted substring frequency score computed by counting occurrences of the search term.
+          If the search term consists of multiple words, both the entire phrase and each individual word are counted.
+  4. Each set of scores is normalized to a 0–1 range and combined equally (50% each) into a final ranking score.
   5. The top 10 ranked agents (with a nonzero final score) are returned as JSON.
 
 Configuration:
@@ -32,7 +32,6 @@ load_dotenv()
 app = Flask(__name__)
 CORS(app)
 
-# Environment variable for your subgraph endpoint on The Graph
 SUBGRAPH_URL = os.environ.get("SUBGRAPH_URL", "")
 PAGE_SIZE = 1000  # The Graph typically returns at most 1000 records per query.
 
@@ -40,7 +39,7 @@ def fetch_agents_from_subgraph(search_term):
     """
     Fetch agents from your subgraph whose 'isActive' is true,
     in paginated batches of PAGE_SIZE until no more remain.
-
+    
     NOTE: The current GraphQL query does not filter by search_term on-chain.
     We fetch all active agents and then rank them locally.
     """
@@ -86,9 +85,7 @@ def fetch_agents_from_subgraph(search_term):
         )
 
         if response.status_code != 200:
-            raise Exception(
-                f"GraphQL query failed with status {response.status_code}: {response.text}"
-            )
+            raise Exception(f"GraphQL query failed with status {response.status_code}: {response.text}")
 
         data = response.json()
         if "errors" in data:
@@ -114,15 +111,16 @@ def rank_agents_hybrid(search_term, agents):
            - socialLink, profileUrl, address, adminAddress (each once, tied for third)
       2) Weighted substring frequency score computed by counting (case‑insensitive)
          occurrences of the search term in the same fields with the same weights.
-
-    Each set of scores is normalized (by dividing by its maximum value) so that
-    both lie in the range [0,1], then combined equally (50% each) into a final score.
+         If the search term contains multiple words, both the entire phrase and each individual word are counted.
+    
+    Each set of scores is normalized (by dividing by its maximum value) so that both lie in the range [0,1],
+    then combined equally (50% each) into a final score.
     Returns the top 10 agents with a final score above zero.
     """
     if not agents:
         return []
 
-    # Prepare the weighted text for each agent
+    # Prepare the weighted text for each agent (for TF-IDF)
     weighted_texts = []
     for agent in agents:
         name = agent.get("name", "") or ""
@@ -142,9 +140,9 @@ def rank_agents_hybrid(search_term, agents):
         )
         weighted_texts.append(combined_text)
 
-    # ---------------------------
-    # TF-IDF based ranking
-    # ---------------------------
+    # -------------------------------------
+    # 1) TF-IDF based ranking
+    # -------------------------------------
     vectorizer = TfidfVectorizer(stop_words="english")
     tfidf_matrix = vectorizer.fit_transform(weighted_texts)
     query_vector = vectorizer.transform([search_term])
@@ -154,10 +152,16 @@ def rank_agents_hybrid(search_term, agents):
     max_tfidf = max(tfidf_scores) if max(tfidf_scores) > 0 else 1
     normalized_tfidf = [score / max_tfidf for score in tfidf_scores]
 
-    # ---------------------------
-    # Weighted substring frequency scoring
-    # ---------------------------
+    # -------------------------------------
+    # 2) Weighted substring frequency scoring
+    # -------------------------------------
+    # Prepare tokens: always include the entire search term.
+    # If multiple words are present, also include each individual word.
     search_term_lower = search_term.lower()
+    tokens = [search_term_lower]
+    if " " in search_term_lower:
+        tokens += search_term_lower.split()
+
     substring_scores = []
     for agent in agents:
         name = agent.get("name", "") or ""
@@ -167,21 +171,24 @@ def rank_agents_hybrid(search_term, agents):
         address = agent.get("address", "") or ""
         adminAddress = agent.get("adminAddress", "") or ""
 
-        count = (3 * name.lower().count(search_term_lower) +
-                 2 * description.lower().count(search_term_lower) +
-                 socialLink.lower().count(search_term_lower) +
-                 profileUrl.lower().count(search_term_lower) +
-                 address.lower().count(search_term_lower) +
-                 adminAddress.lower().count(search_term_lower))
-        substring_scores.append(count)
+        # For each field, count occurrences for all tokens and apply field weight
+        name_count = 3 * sum(name.lower().count(token) for token in tokens)
+        desc_count = 2 * sum(description.lower().count(token) for token in tokens)
+        social_count = sum(socialLink.lower().count(token) for token in tokens)
+        profile_count = sum(profileUrl.lower().count(token) for token in tokens)
+        address_count = sum(address.lower().count(token) for token in tokens)
+        admin_count = sum(adminAddress.lower().count(token) for token in tokens)
+
+        total_count = name_count + desc_count + social_count + profile_count + address_count + admin_count
+        substring_scores.append(total_count)
 
     # Normalize substring frequency scores (max-based normalization)
     max_sub = max(substring_scores) if max(substring_scores) > 0 else 1
     normalized_sub = [score / max_sub for score in substring_scores]
 
-    # ---------------------------
-    # Combine scores equally (50% TF-IDF, 50% substring)
-    # ---------------------------
+    # -------------------------------------
+    # 3) Combine scores equally (50% TF-IDF, 50% substring)
+    # -------------------------------------
     final_scores = [0.5 * tfidf + 0.5 * sub
                     for tfidf, sub in zip(normalized_tfidf, normalized_sub)]
 
@@ -201,6 +208,7 @@ def search():
     API endpoint: Expects a query parameter "q".
     1) Fetch all isActive agents from the subgraph.
     2) Rank them using the hybrid approach combining TF‑IDF and weighted substring frequency scoring.
+       (When the search term contains multiple words, both the entire phrase and each word are considered.)
     3) Return the top 10 agents as JSON.
     """
     user_query = request.args.get("q", "").strip()
