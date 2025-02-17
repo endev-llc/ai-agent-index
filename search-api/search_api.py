@@ -172,8 +172,8 @@ def rank_agents_hybrid(search_term, agents):
         adminAddress = agent.get("adminAddress", "") or ""
 
         # For each field, count occurrences for all tokens and apply field weight
-        name_count = 3 * sum(name.lower().count(token) for token in tokens)
-        desc_count = 2 * sum(description.lower().count(token) for token in tokens)
+        name_count = 5 * sum(name.lower().count(token) for token in tokens)
+        desc_count =  sum(description.lower().count(token) for token in tokens)
         social_count = sum(socialLink.lower().count(token) for token in tokens)
         profile_count = sum(profileUrl.lower().count(token) for token in tokens)
         address_count = sum(address.lower().count(token) for token in tokens)
