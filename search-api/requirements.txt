@@ -1,3 +1,5 @@
 flask
 requests
 scikit-learn
+python-dotenv
+flask-cors
