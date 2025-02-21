@@ -1,0 +1,36 @@
+version: "2.0"
+
+services:
+  search-api:
+    image: "endevjake/search-api:latest"
+    # This command runs your API (adjust if your script needs additional args)
+    command: ["python", "search_api.py"]
+    # Use the port that your Flask app actually listens on.
+    expose:
+      - port: 5001
+        to:
+          - global: true
+
+profiles:
+  compute:
+    search-api:
+      resources:
+        cpu:
+          units: 1
+        memory:
+          size: 512Mi
+        storage:
+          size: 1Gi
+
+  placement:
+    akash:
+      pricing:
+        search-api:
+          denom: uakt
+          amount: 1000
+
+deployment:
+  search-api:
+    akash:
+      profile: search-api
+      count: 1
