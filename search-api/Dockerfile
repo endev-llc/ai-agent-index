@@ -11,8 +11,8 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Copy your API code into the container.
 COPY . .
 
-# Expose the port your API listens on (adjust if needed).
-EXPOSE 5000
+# Expose the port your API listens on (now updated to 5001).
+EXPOSE 5001
 
 # Define the command to run your API.
 CMD ["python", "search_api.py"]

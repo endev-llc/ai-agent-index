@@ -1,36 +1,34 @@
+---
 version: "2.0"
-
 services:
-  search-api:
-    image: "endevjake/search-api:latest"
-    # This command runs your API (adjust if your script needs additional args)
-    command: ["python", "search_api.py"]
-    # Use the port that your Flask app actually listens on.
+  service-1:
+    image: endevjake/search-api:v1.0.0
     expose:
       - port: 5001
+        as: 5001
         to:
           - global: true
-
+    env:
+      - >-
+        SUBGRAPH_URL=https://api.studio.thegraph.com/query/103943/ai-agent-index/version/latest
 profiles:
   compute:
-    search-api:
+    service-1:
       resources:
         cpu:
           units: 1
         memory:
           size: 512Mi
         storage:
-          size: 1Gi
-
+          - size: 1Gi
   placement:
-    akash:
+    dcloud:
       pricing:
-        search-api:
+        service-1:
           denom: uakt
           amount: 1000
-
 deployment:
-  search-api:
-    akash:
-      profile: search-api
+  service-1:
+    dcloud:
+      profile: service-1
       count: 1
