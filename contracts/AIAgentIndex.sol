@@ -4,15 +4,15 @@ pragma solidity ^0.8.19;
 contract AIAgentIndex {
     struct Agent {
         string name;
-        string address_;
+        string wallet_address;  // Renamed from address_
         string socialLink;
         string profileUrl;
         string description;
         bool isActive;
         uint256 addedAt;
-        address owner;         // Owner of this agent entry (technical control)
+        address owner;
         uint256 lastUpdateTime;
-        string admin_address;  // NEW: Displayed admin address (can be empty)
+        string admin_address;
     }
     
     struct SearchResult {
@@ -24,23 +24,22 @@ contract AIAgentIndex {
     uint256 public constant MAX_NAME_LENGTH = 100;
     uint256 public constant MAX_DESCRIPTION_LENGTH = 5000;
     uint256 public constant MAX_URL_LENGTH = 500;
-    uint256 public constant MIN_LISTING_FEE = 0.0001 ether;
+    uint256 public constant MIN_LISTING_FEE = 0; // Changed to 0
     
     // Storage layout (must maintain order for upgradability)
     address public owner;
     mapping(uint256 => Agent) public agents;
     uint256 public agentCount;
-    uint256 public listingFee;
-    address public feeCollector;
+    uint256 public listingFee; // Keep this for storage layout compatibility
+    address public feeCollector; // Keep this for storage layout compatibility
     
-    // Additional mappings for search functionality
-    mapping(string => uint256[]) private addressToIds;
+    // Search mappings
+    mapping(string => uint256[]) private walletAddressToIds;
     mapping(string => uint256[]) private nameToIds;
     
-    // NEW: Mapping for pending admin transfers
     mapping(uint256 => address) public pendingAdmins;
     
-    // Existing events
+    // Events
     event AgentAdded(uint256 indexed id, string name, uint256 timestamp, address indexed owner);
     event AgentUpdated(uint256 indexed id, string name, address indexed owner);
     event AgentDeactivated(uint256 indexed id, address indexed owner);
@@ -59,10 +58,11 @@ contract AIAgentIndex {
     function initialize(address _feeCollector, uint256 _listingFee) public {
         require(!initialized, "Contract already initialized");
         require(_feeCollector != address(0), "Invalid fee collector");
-        require(_listingFee >= MIN_LISTING_FEE, "Fee too low");
+        // We keep this interface for backwards compatibility
+        // but fees are now effectively disabled
         
         feeCollector = _feeCollector;
-        listingFee = _listingFee;
+        listingFee = _listingFee; // Should be 0
         initialized = true;
     }
     
@@ -83,8 +83,8 @@ contract AIAgentIndex {
         _;
     }
     
+    // Keep these fee-related functions for backward compatibility
     function setListingFee(uint256 _newFee) public onlyOwner {
-        require(_newFee >= MIN_LISTING_FEE, "Fee too low");
         listingFee = _newFee;
         emit FeeUpdated(_newFee);
     }
@@ -97,24 +97,24 @@ contract AIAgentIndex {
     
     function addAgent(
         string memory _name,
-        string memory _address,
+        string memory _wallet_address,
         string memory _socialLink,
         string memory _profileUrl,
         string memory _description,
         string memory _admin_address
     ) public payable 
       validString(_name, MAX_NAME_LENGTH)
-      validString(_address, MAX_URL_LENGTH)
+      validString(_wallet_address, MAX_URL_LENGTH)
       validString(_socialLink, MAX_URL_LENGTH)
       validString(_profileUrl, MAX_URL_LENGTH)
       validString(_description, MAX_DESCRIPTION_LENGTH)
     returns (uint256) {
-        require(msg.value >= listingFee, "Insufficient listing fee");
+        // No longer require fee
         
         uint256 newAgentId = agentCount;
         agents[newAgentId] = Agent({
             name: _name,
-            address_: _address,
+            wallet_address: _wallet_address,
             socialLink: _socialLink,
             profileUrl: _profileUrl,
             description: _description,
@@ -126,17 +126,13 @@ contract AIAgentIndex {
         });
         
         // Update search mappings
-        addressToIds[_address].push(newAgentId);
+        walletAddressToIds[_wallet_address].push(newAgentId);
         nameToIds[_name].push(newAgentId);
         
-        // Transfer fee
-        (bool sent,) = feeCollector.call{value: listingFee}("");
-        require(sent, "Fee transfer failed");
-        
-        // Refund excess
-        if (msg.value > listingFee) {
-            (bool refundSent,) = msg.sender.call{value: msg.value - listingFee}("");
-            require(refundSent, "Failed to refund excess");
+        // Refund any sent value
+        if (msg.value > 0) {
+            (bool refundSent,) = msg.sender.call{value: msg.value}("");
+            require(refundSent, "Failed to refund");
         }
         
         agentCount++;
@@ -189,13 +185,13 @@ contract AIAgentIndex {
     function updateAgent(
         uint256 _id,
         string memory _name,
-        string memory _address,
+        string memory _wallet_address,
         string memory _socialLink,
         string memory _profileUrl,
         string memory _description
     ) public onlyAgentOwner(_id)
       validString(_name, MAX_NAME_LENGTH)
-      validString(_address, MAX_URL_LENGTH)
+      validString(_wallet_address, MAX_URL_LENGTH)
       validString(_socialLink, MAX_URL_LENGTH)
       validString(_profileUrl, MAX_URL_LENGTH)
       validString(_description, MAX_DESCRIPTION_LENGTH)
@@ -205,14 +201,14 @@ contract AIAgentIndex {
         
         // Update agent
         agents[_id].name = _name;
-        agents[_id].address_ = _address;
+        agents[_id].wallet_address = _wallet_address;
         agents[_id].socialLink = _socialLink;
         agents[_id].profileUrl = _profileUrl;
         agents[_id].description = _description;
         agents[_id].lastUpdateTime = block.timestamp;
         
         // Add new search mappings
-        addressToIds[_address].push(_id);
+        walletAddressToIds[_wallet_address].push(_id);
         nameToIds[_name].push(_id);
         
         emit AgentUpdated(_id, _name, msg.sender);
@@ -226,33 +222,30 @@ contract AIAgentIndex {
     
     function reactivateAgent(uint256 _id) public payable onlyAgentOwner(_id) {
         require(!agents[_id].isActive, "Agent already active");
-        require(msg.value >= listingFee, "Insufficient fee");
+        // No longer require fee
         
         agents[_id].isActive = true;
         agents[_id].lastUpdateTime = block.timestamp;
         
-        // Transfer fee
-        (bool sent,) = feeCollector.call{value: listingFee}("");
-        require(sent, "Fee transfer failed");
-        
-        // Refund excess
-        if (msg.value > listingFee) {
-            (bool refundSent,) = msg.sender.call{value: msg.value - listingFee}("");
-            require(refundSent, "Failed to refund excess");
+        // Refund any sent value
+        if (msg.value > 0) {
+            (bool refundSent,) = msg.sender.call{value: msg.value}("");
+            require(refundSent, "Failed to refund");
         }
         
         emit AgentReactivated(_id, msg.sender);
     }
     
+    // Rest of the functions remain the same
     function _removeFromSearchMappings(uint256 _id) private {
         Agent memory agent = agents[_id];
         
-        // Remove from address mapping
-        uint256[] storage addressIds = addressToIds[agent.address_];
-        for (uint256 i = 0; i < addressIds.length; i++) {
-            if (addressIds[i] == _id) {
-                addressIds[i] = addressIds[addressIds.length - 1];
-                addressIds.pop();
+        // Remove from wallet address mapping
+        uint256[] storage walletIds = walletAddressToIds[agent.wallet_address];
+        for (uint256 i = 0; i < walletIds.length; i++) {
+            if (walletIds[i] == _id) {
+                walletIds[i] = walletIds[walletIds.length - 1];
+                walletIds.pop();
                 break;
             }
         }
@@ -273,7 +266,7 @@ contract AIAgentIndex {
         bytes memory b = bytes(_addr);
         if (b[0] != "0" || b[1] != "x") return false;
         for (uint i = 2; i < 42; i++) {
-            bytes1 currentChar = b[i];  // Changed from 'char' to 'currentChar'
+            bytes1 currentChar = b[i];
             if (!(currentChar >= "0" && currentChar <= "9") && 
                 !(currentChar >= "a" && currentChar <= "f") &&
                 !(currentChar >= "A" && currentChar <= "F")) return false;
@@ -296,22 +289,23 @@ contract AIAgentIndex {
         results = new SearchResult[](pageSize);
         uint256 resultCount = 0;
         
-        // Check if search term is an address (for admin_address search)
+        // Check if search term is an address
         bool isAddressSearch = isValidAddress(keyword);
 
         for (uint256 i = startIndex; i < agentCount && resultCount < pageSize; i++) {
             if (!agents[i].isActive) continue;
             
-            // Check all searchable fields
             if (quickContains(agents[i].name, keyword) ||
-                quickContains(agents[i].address_, keyword) ||
+                quickContains(agents[i].wallet_address, keyword) ||
                 quickContains(agents[i].socialLink, keyword) ||
                 quickContains(agents[i].profileUrl, keyword) ||
                 quickContains(agents[i].description, keyword) ||
                 quickContains(agents[i].admin_address, keyword) ||
                 (isAddressSearch && 
-                 keccak256(abi.encodePacked(toLowerCase(agents[i].admin_address))) == 
-                 keccak256(abi.encodePacked(toLowerCase(keyword))))) {
+                 (keccak256(abi.encodePacked(toLowerCase(agents[i].admin_address))) == 
+                 keccak256(abi.encodePacked(toLowerCase(keyword))) ||
+                 keccak256(abi.encodePacked(toLowerCase(agents[i].wallet_address))) == 
+                 keccak256(abi.encodePacked(toLowerCase(keyword)))))) {
                 results[resultCount] = SearchResult(i, agents[i]);
                 resultCount++;
             }
@@ -342,7 +336,6 @@ contract AIAgentIndex {
         return string(bLower);
     }
 
-    // Super simple contains function that just checks for exact matches
     function quickContains(string memory source, string memory searchStr) private pure returns (bool) {
         bytes memory sourceBytes = bytes(source);
         bytes memory searchBytes = bytes(searchStr);
@@ -362,7 +355,6 @@ contract AIAgentIndex {
         return false;
     }
 
-    // Separate function specifically for fetching agents by owner
     function getAgentsByOwner(
         address ownerAddress,
         uint256 startIndex,
@@ -375,11 +367,9 @@ contract AIAgentIndex {
         require(pageSize > 0 && pageSize <= 50, "Invalid page size");
         require(startIndex <= agentCount, "Start index out of bounds");
 
-        // Initialize return array with maximum possible size for this page
         results = new SearchResult[](pageSize);
         uint256 resultCount = 0;
         
-        // Search through agents starting from startIndex
         for (uint256 i = startIndex; i < agentCount && resultCount < pageSize; i++) {
             if (agents[i].owner == ownerAddress) {
                 results[resultCount] = SearchResult(i, agents[i]);
@@ -387,13 +377,11 @@ contract AIAgentIndex {
             }
         }
 
-        // Create properly sized array for actual results
         SearchResult[] memory finalResults = new SearchResult[](resultCount);
         for (uint256 i = 0; i < resultCount; i++) {
             finalResults[i] = results[i];
         }
 
-        // Calculate if there are more results and next start index
         nextStartIndex = startIndex + pageSize;
         hasMore = nextStartIndex < agentCount;
 

@@ -4,13 +4,13 @@ async function main() {
   console.log("Starting deployment...");
 
   // Configuration
-  const feeCollector = "0xEEFD3e2CF0c5b38B26a95C317DA3C23E10de5336"; // Your fee collector address
-  const initialFee = hre.ethers.parseEther("0.0001"); // Initial listing fee (0.0001 ETH)
+  const feeCollector = "0xEEFD3e2CF0c5b38B26a95C317DA3C23E10de5336"; // Can keep same fee collector address
+  const initialFee = hre.ethers.parseEther("0"); // Set initial fee to 0
 
   // First deploy the implementation contract
   const AIAgentIndex = await hre.ethers.getContractFactory("AIAgentIndex");
   console.log("Deploying AIAgentIndex implementation...");
-  const implementation = await AIAgentIndex.deploy();  // Remove constructor arguments here
+  const implementation = await AIAgentIndex.deploy();
   await implementation.waitForDeployment();
   
   const implementationAddress = await implementation.getAddress();
@@ -41,7 +41,7 @@ async function main() {
   try {
     await hre.run("verify:verify", {
       address: implementationAddress,
-      constructorArguments: []  // No constructor arguments
+      constructorArguments: []
     });
     console.log("Implementation contract verified successfully");
   } catch (error) {
