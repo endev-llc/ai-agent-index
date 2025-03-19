@@ -71,11 +71,15 @@ app.get('/register-agent', async (req, res) => {
     // Submit transaction
     const tx = await contract.addAgent(
       name,
-      agentWallet.address,  // Use wallet address for wallet_address field
+      agentWallet.address,
       socialLink || '',
       profileUrl || '',
       description || name,
-      agentWallet.address   // Also use wallet address as admin_address
+      agentWallet.address,
+      {
+        maxFeePerGas: ethers.utils.parseUnits("0.001", "gwei"),
+        maxPriorityFeePerGas: ethers.utils.parseUnits("0.0005", "gwei")
+      }
     );
     
     console.log(`Transaction submitted: ${tx.hash}`);
