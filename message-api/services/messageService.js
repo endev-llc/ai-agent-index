@@ -1,10 +1,13 @@
 // services/messageService.js
 const { ethers } = require('ethers');
+const fetch = require('node-fetch');
 
 class MessageService {
   constructor(contract, provider) {
     this.contract = contract;
     this.provider = provider;
+    this.subgraphUrl = 'https://api.studio.thegraph.com/query/103943/ai-agent-index/version/latest';
+    this.PAGE_SIZE = 1000; // TheGraph typically returns at most 1000 records per query
   }
 
   /**
@@ -74,41 +77,140 @@ class MessageService {
   }
 
   /**
-   * Check if an agent exists in the registry
+   * Check if an agent exists in the registry by querying the subgraph with pagination
    */
   async checkAgentExists(address) {
     try {
-      // Search through agents to check if this address is registered
-      let exists = false;
-      let i = 0;
-      const pageSize = 10;
+      console.log(`Checking if agent with address ${address} exists in subgraph...`);
       
-      while (!exists) {
-        // Get a page of agents
-        const results = await this.contract.searchPaginated("", i, pageSize);
+      // Normalize the address (convert to lowercase)
+      const normalizedAddress = address.toLowerCase();
+      
+      let skip = 0;
+      let foundAgent = false;
+      let totalFetched = 0;
+      
+      // Pagination loop - continue until we find the agent or run out of results
+      while (true) {
+        console.log(`Fetching agents from subgraph (skip=${skip}, limit=${this.PAGE_SIZE})...`);
         
-        // Check if this address is in the results
-        for (const result of results[0]) {
-          if (result.agent.wallet_address.toLowerCase() === address.toLowerCase()) {
-            exists = true;
+        const query = {
+          query: `
+            query($first: Int!, $skip: Int!) {
+              agents(
+                first: $first, 
+                skip: $skip
+              ) {
+                id
+                address
+                name
+                isActive
+              }
+            }
+          `,
+          variables: {
+            first: this.PAGE_SIZE,
+            skip: skip
+          }
+        };
+        
+        // Make request to the subgraph
+        const response = await fetch(this.subgraphUrl, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(query)
+        });
+        
+        if (!response.ok) {
+          throw new Error(`Subgraph query failed: ${response.statusText}`);
+        }
+        
+        const result = await response.json();
+        
+        // Check for errors in response
+        if (result.errors) {
+          throw new Error(`GraphQL errors: ${JSON.stringify(result.errors)}`);
+        }
+        
+        // Extract agents from response
+        const agents = result.data.agents;
+        console.log(`Fetched ${agents.length} agents (page ${skip/this.PAGE_SIZE + 1})`);
+        
+        // Check if our agent exists in this batch
+        for (const agent of agents) {
+          // Compare addresses (case-insensitive)
+          if (agent.address.toLowerCase() === normalizedAddress) {
+            console.log(`Found agent with ID ${agent.id} and name "${agent.name}"`);
+            // Only return true if the agent is active
+            foundAgent = agent.isActive;
+            console.log(`Agent is ${foundAgent ? 'active' : 'inactive'}`);
             break;
           }
         }
         
-        // Check if we've reached the end or should continue
-        if (!results[2] || results[0].length === 0) {
+        // If we found the agent or reached the end of results, exit loop
+        if (foundAgent || agents.length < this.PAGE_SIZE) {
           break;
         }
         
-        i += pageSize;
+        // Move to next page
+        skip += this.PAGE_SIZE;
+        totalFetched += agents.length;
         
-        // Failsafe to prevent infinite loops
-        if (i > 10000) break;
+        // Safety check to prevent infinite loops (stop after ~100k agents)
+        if (totalFetched > 100000) {
+          console.log('Reached maximum fetch limit, stopping search');
+          break;
+        }
       }
       
-      return exists;
+      console.log(`Agent exists check result: ${foundAgent}`);
+      return foundAgent;
     } catch (error) {
-      console.error('Error checking if agent exists:', error);
+      console.error('Error querying subgraph:', error);
+      
+      // Fallback to contract check if subgraph fails
+      console.log('Falling back to contract-based check...');
+      return this.checkAgentExistsInContract(address);
+    }
+  }
+  
+  /**
+   * Fallback method to check if agent exists by directly querying the contract
+   */
+  async checkAgentExistsInContract(address) {
+    try {
+      console.log(`Checking if agent with address ${address} exists via contract...`);
+      
+      // Get the total agent count
+      const agentCount = await this.contract.agentCount();
+      console.log(`Total agents in registry: ${agentCount.toString()}`);
+      
+      if (agentCount.toNumber() === 0) {
+        console.log('No agents in registry');
+        return false;
+      }
+      
+      // Try to find the agent by checking each agent
+      for (let i = 1; i <= Math.min(agentCount.toNumber(), 2000); i++) {
+        try {
+          const agent = await this.contract.getAgent(i);
+          
+          // Check if this is the agent we're looking for
+          if (agent.address_.toLowerCase() === address.toLowerCase()) {
+            console.log(`Found agent #${i} with matching address`);
+            return agent.isActive;
+          }
+        } catch (err) {
+          // Skip this agent if there's an error
+          console.log(`Error checking agent #${i}: ${err.message}`);
+        }
+      }
+      
+      console.log('No matching agent found');
+      return false;
+    } catch (error) {
+      console.error('Error in contract-based agent check:', error);
       return false;
     }
   }
