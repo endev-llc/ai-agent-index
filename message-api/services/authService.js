@@ -3,15 +3,25 @@ const { ethers } = require('ethers');
 
 class AuthService {
   /**
-   * Validate private key format
+   * Validate if string is a valid private key
    */
-  validatePrivateKey(authString) {
-    // Check if it's a valid private key (64 hex chars)
-    if (/^(0x)?[0-9a-fA-F]{64}$/.test(authString)) {
-      return authString.startsWith('0x') ? authString : `0x${authString}`;
+  isValidPrivateKey(authString) {
+    if (!authString || authString.trim() === '') {
+      return false;
     }
     
-    throw new Error('Invalid private key format. Must be 64 hex characters with optional 0x prefix.');
+    // Check if it's a valid private key (64 hex chars)
+    try {
+      if (/^(0x)?[0-9a-fA-F]{64}$/.test(authString)) {
+        // Try to create a wallet to verify it's a valid key
+        const privateKey = authString.startsWith('0x') ? authString : `0x${authString}`;
+        new ethers.Wallet(privateKey);
+        return true;
+      }
+      return false;
+    } catch (e) {
+      return false;
+    }
   }
 
   /**
@@ -24,6 +34,18 @@ class AuthService {
     } catch (error) {
       throw new Error(`Invalid authentication: ${error.message}`);
     }
+  }
+
+  /**
+   * Validate private key format
+   */
+  validatePrivateKey(authString) {
+    // Check if it's a valid private key (64 hex chars)
+    if (/^(0x)?[0-9a-fA-F]{64}$/.test(authString)) {
+      return authString.startsWith('0x') ? authString : `0x${authString}`;
+    }
+    
+    throw new Error('Invalid private key format. Must be 64 hex characters with optional 0x prefix.');
   }
 
   /**

@@ -6,6 +6,7 @@ const bodyParser = require('body-parser');
 const dotenv = require('dotenv');
 const fs = require('fs');
 const path = require('path');
+const fetch = require('node-fetch');
 
 // Load environment variables
 dotenv.config();
@@ -14,6 +15,8 @@ dotenv.config();
 const authService = require('./services/authService');
 const MessageService = require('./services/messageService');
 const responseFormatter = require('./utils/responseFormatter');
+// Import the wallet generator
+const walletGenerator = require('./services/walletService');
 
 // Initialize Express
 const app = express();
@@ -85,8 +88,17 @@ app.get('/message', async (req, res) => {
       return res.status(400).json(responseFormatter.error('Message text is required'));
     }
     
-    if (!auth) {
-      return res.status(400).json(responseFormatter.error('Authentication is required'));
+    // If auth is missing or empty, prompt for registration with wallet generation
+    if (!auth || auth.trim() === '') {
+      console.log('Empty auth value, prompting for registration with wallet generation');
+      return res.status(400).json(responseFormatter.newRegistrationPrompt(to, text));
+    }
+    
+    // Check if auth is a valid private key
+    if (!authService.isValidPrivateKey(auth)) {
+      // If not a valid private key, prompt for registration with wallet generation
+      console.log('Invalid private key format, prompting for registration with wallet generation');
+      return res.status(400).json(responseFormatter.newRegistrationPrompt(to, text));
     }
     
     // Get sender's wallet from auth
@@ -98,7 +110,7 @@ app.get('/message', async (req, res) => {
       const agentExists = await messageService.checkAgentExists(senderAddress);
       
       if (!agentExists) {
-        // Agent needs to register first
+        // Agent needs to register first (but they already have a private key)
         return res.status(400).json(
           responseFormatter.registrationRequired(to, text, auth)
         );
@@ -124,9 +136,9 @@ app.get('/message', async (req, res) => {
       return res.json(response);
       
     } catch (error) {
-      return res.status(400).json(responseFormatter.error(
-        `Authentication error: ${error.message}`
-      ));
+      // If there's an authentication error, prompt for registration with wallet generation
+      console.log('Authentication error:', error.message);
+      return res.status(400).json(responseFormatter.newRegistrationPrompt(to, text));
     }
   } catch (error) {
     console.error('Error processing message:', error);
@@ -136,7 +148,163 @@ app.get('/message', async (req, res) => {
   }
 });
 
-// Registration endpoint (for new agents)
+// Register agent with GET endpoint for curl-friendly usage (similar to add-agent-api)
+app.get('/register-agent', async (req, res) => {
+  try {
+    // Extract parameters from query string
+    const { name, socialLink, profileUrl, description } = req.query;
+    
+    if (!name) {
+      return res.status(400).json(responseFormatter.error('Agent name is required'));
+    }
+    
+    // Generate wallet for messaging
+    const agentWallet = walletGenerator.generateWallet();
+    
+    console.log(`Registering agent: ${name}`);
+    console.log(`Generated wallet address: ${agentWallet.address}`);
+    
+    // Get optimal gas settings
+    const gasSettings = await getMinimumViableGasPrice();
+    
+    // Submit transaction
+    const tx = await contract.addAgent(
+      name,
+      agentWallet.address,
+      socialLink || '',
+      profileUrl || '',
+      description || name,
+      agentWallet.address,
+      gasSettings
+    );
+    
+    console.log(`Transaction submitted: ${tx.hash}`);
+    
+    // Wait for confirmation
+    const receipt = await tx.wait();
+    
+    // Find the AgentAdded event to get the agent ID
+    const addedEvent = receipt.events.find(e => e.event === 'AgentAdded');
+    const agentId = addedEvent.args.id.toString();
+    
+    // Log gas usage details
+    const effectiveGasPrice = receipt.effectiveGasPrice;
+    const gasUsed = receipt.gasUsed;
+    console.log(`Gas used: ${gasUsed.toString()}`);
+    console.log(`Effective gas price: ${ethers.utils.formatUnits(effectiveGasPrice, "gwei")} Gwei`);
+    
+    // Return response with agent details
+    res.json({
+      success: true,
+      message: 'Agent successfully registered',
+      agent: {
+        id: agentId,
+        name,
+        wallet_address: agentWallet.address,
+        socialLink: socialLink || '',
+        profileUrl: profileUrl || '',
+        description: description || name,
+        wallet: {
+          address: agentWallet.address,
+          privateKey: agentWallet.privateKey
+        }
+      },
+      transaction: {
+        hash: receipt.transactionHash,
+        blockNumber: receipt.blockNumber,
+        gasUsed: gasUsed.toString(),
+        effectiveGasPrice: ethers.utils.formatUnits(effectiveGasPrice, "gwei") + " Gwei"
+      },
+      messageExample: `curl -G 'http://localhost:5003/message' \\
+  --data-urlencode 'to=RECIPIENT_ADDRESS' \\
+  --data-urlencode 'text=YOUR_MESSAGE' \\
+  --data-urlencode 'auth=${agentWallet.privateKey}'`
+    });
+    
+  } catch (error) {
+    console.error('Registration error:', error);
+    
+    // If we get a gas-related error, retry once with higher gas
+    if (error.code === 'UNPREDICTABLE_GAS_LIMIT' || 
+        error.message.includes('max fee per gas less than block base fee')) {
+      
+      try {
+        console.log('Retrying with higher gas price...');
+        
+        // Generate a new wallet (since the previous attempt might have partial state)
+        const agentWallet = walletGenerator.generateWallet();
+        
+        // Use a higher gas price for the retry
+        const tx = await contract.addAgent(
+          req.query.name,
+          agentWallet.address,
+          req.query.socialLink || '',
+          req.query.profileUrl || '',
+          req.query.description || req.query.name,
+          agentWallet.address,
+          {
+            maxFeePerGas: ethers.utils.parseUnits("0.002", "gwei"),      // Higher backup gas price
+            maxPriorityFeePerGas: ethers.utils.parseUnits("0.0002", "gwei")
+          }
+        );
+        
+        console.log(`Retry transaction submitted: ${tx.hash}`);
+        const receipt = await tx.wait();
+        
+        // Find the AgentAdded event
+        const addedEvent = receipt.events.find(e => e.event === 'AgentAdded');
+        const agentId = addedEvent.args.id.toString();
+        
+        // Log retry gas usage
+        const effectiveGasPrice = receipt.effectiveGasPrice;
+        const gasUsed = receipt.gasUsed;
+        console.log(`Retry gas used: ${gasUsed.toString()}`);
+        console.log(`Retry effective gas price: ${ethers.utils.formatUnits(effectiveGasPrice, "gwei")} Gwei`);
+        
+        // Return success response
+        return res.json({
+          success: true,
+          message: 'Agent successfully registered (retry)',
+          agent: {
+            id: agentId,
+            name: req.query.name,
+            wallet_address: agentWallet.address,
+            socialLink: req.query.socialLink || '',
+            profileUrl: req.query.profileUrl || '',
+            description: req.query.description || req.query.name,
+            wallet: {
+              address: agentWallet.address,
+              privateKey: agentWallet.privateKey
+            }
+          },
+          transaction: {
+            hash: receipt.transactionHash,
+            blockNumber: receipt.blockNumber,
+            gasUsed: gasUsed.toString(),
+            effectiveGasPrice: ethers.utils.formatUnits(effectiveGasPrice, "gwei") + " Gwei"
+          },
+          messageExample: `curl -G 'http://localhost:5003/message' \\
+  --data-urlencode 'to=RECIPIENT_ADDRESS' \\
+  --data-urlencode 'text=YOUR_MESSAGE' \\
+  --data-urlencode 'auth=${agentWallet.privateKey}'`
+        });
+        
+      } catch (retryError) {
+        console.error('Retry also failed:', retryError);
+        return res.status(500).json(responseFormatter.error(
+          `Initial attempt: ${error.message}, Retry: ${retryError.message}`, 500
+        ));
+      }
+    }
+    
+    // For non-gas errors, just return the error
+    return res.status(500).json(responseFormatter.error(
+      `Registration error: ${error.message}`, 500
+    ));
+  }
+});
+
+// Registration endpoint (for existing private key)
 app.get('/register', async (req, res) => {
   try {
     const { 
