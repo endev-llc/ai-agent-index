@@ -47,6 +47,15 @@ const wallet = new ethers.Wallet(PRIVATE_KEY, provider);
 const contract = new ethers.Contract(CONTRACT_ADDRESS, CONTRACT_ABI, wallet);
 const messageService = new MessageService(contract, provider);
 
+const MESSAGE_RELAY_ADDRESS = process.env.MESSAGE_RELAY_ADDRESS;
+if (MESSAGE_RELAY_ADDRESS) {
+  console.log(`Message Relay configured at: ${MESSAGE_RELAY_ADDRESS}`);
+  console.log(`Gas sponsorship is ACTIVE - users will not need ETH to send messages`);
+} else {
+  console.warn("MESSAGE_RELAY_ADDRESS not set in environment.");
+  console.warn("Gas sponsorship is NOT active - users will need ETH in their wallets to send messages");
+}
+
 // Get minimum viable gas price
 async function getMinimumViableGasPrice() {
   try {
@@ -137,10 +146,16 @@ app.get('/message', async (req, res) => {
         return res.json(response);
       } catch (error) {
         // Specifically handle insufficient funds error
-        if (error.code === 'INSUFFICIENT_FUNDS' || 
-            error.message.includes('insufficient funds')) {
-          console.error('Error sending message:', error.message);
-          return res.status(400).json(responseFormatter.insufficientFundsError(senderAddress));
+        if (error.code === 'INSUFFICIENT_FUNDS' || error.message.includes('insufficient funds')) {
+          // If the error mentions server wallet, it's our infrastructure wallet that's out of funds
+          if (error.message.includes('Server wallet')) {
+            console.error('Server wallet has insufficient funds:', error.message);
+            return res.status(500).json(responseFormatter.serverWalletInsufficientFundsError());
+          } else {
+            // Regular insufficient funds error for the sender
+            console.error('Error sending message:', error.message);
+            return res.status(400).json(responseFormatter.insufficientFundsError(senderAddress));
+          }
         }
         // Handle other transaction errors
         console.error('Error sending message:', error.message);
