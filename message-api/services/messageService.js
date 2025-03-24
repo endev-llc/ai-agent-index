@@ -43,7 +43,12 @@ class MessageService {
       };
     } catch (error) {
       console.error('Error sending message:', error);
-      throw error;
+      // Make sure we preserve the original error code
+      if (error.code) {
+        throw error;
+      } else {
+        throw new Error(`Message sending failed: ${error.message}`);
+      }
     }
   }
 

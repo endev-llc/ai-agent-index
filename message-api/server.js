@@ -116,29 +116,52 @@ app.get('/message', async (req, res) => {
         );
       }
       
-      // Send the message
-      const txResult = await messageService.sendMessage(senderWallet, to, text);
-      
-      // Generate command to save auth locally
-      const saveCommand = authService.generateSaveCommand(auth);
-      
-      // Format the response
-      const response = messageService.formatMessageResponse(
-        txResult, 
-        senderAddress, 
-        to, 
-        text
-      );
-      
-      // Add save command if needed
-      response.saveSecretCommand = saveCommand;
-      
-      return res.json(response);
+      try {
+        // Send the message
+        const txResult = await messageService.sendMessage(senderWallet, to, text);
+        
+        // Generate command to save auth locally
+        const saveCommand = authService.generateSaveCommand(auth);
+        
+        // Format the response
+        const response = messageService.formatMessageResponse(
+          txResult, 
+          senderAddress, 
+          to, 
+          text
+        );
+        
+        // Add save command if needed
+        response.saveSecretCommand = saveCommand;
+        
+        return res.json(response);
+      } catch (error) {
+        // Specifically handle insufficient funds error
+        if (error.code === 'INSUFFICIENT_FUNDS' || 
+            error.message.includes('insufficient funds')) {
+          console.error('Error sending message:', error.message);
+          return res.status(400).json(responseFormatter.insufficientFundsError(senderAddress));
+        }
+        // Handle other transaction errors
+        console.error('Error sending message:', error.message);
+        return res.status(400).json(responseFormatter.error(
+          `Transaction error: ${error.message}`, 400
+        ));
+      }
       
     } catch (error) {
-      // If there's an authentication error, prompt for registration with wallet generation
-      console.log('Authentication error:', error.message);
-      return res.status(400).json(responseFormatter.newRegistrationPrompt(to, text));
+      // Only handle authentication errors here, not transaction errors
+      if (error.message.includes('Invalid authentication') || 
+          error.message.includes('Invalid private key')) {
+        console.log('Authentication error:', error.message);
+        return res.status(400).json(responseFormatter.newRegistrationPrompt(to, text));
+      }
+      
+      // For other errors, return the actual error
+      console.error('Error processing message:', error);
+      return res.status(500).json(responseFormatter.error(
+        `Server error: ${error.message}`, 500
+      ));
     }
   } catch (error) {
     console.error('Error processing message:', error);
@@ -215,10 +238,7 @@ app.get('/register-agent', async (req, res) => {
         gasUsed: gasUsed.toString(),
         effectiveGasPrice: ethers.utils.formatUnits(effectiveGasPrice, "gwei") + " Gwei"
       },
-      messageExample: `curl -G 'http://localhost:5003/message' \\
-  --data-urlencode 'to=RECIPIENT_ADDRESS' \\
-  --data-urlencode 'text=YOUR_MESSAGE' \\
-  --data-urlencode 'auth=${agentWallet.privateKey}'`
+      messageExample: responseFormatter.formatCommandExample(agentWallet.privateKey)
     });
     
   } catch (error) {
@@ -283,10 +303,7 @@ app.get('/register-agent', async (req, res) => {
             gasUsed: gasUsed.toString(),
             effectiveGasPrice: ethers.utils.formatUnits(effectiveGasPrice, "gwei") + " Gwei"
           },
-          messageExample: `curl -G 'http://localhost:5003/message' \\
-  --data-urlencode 'to=RECIPIENT_ADDRESS' \\
-  --data-urlencode 'text=YOUR_MESSAGE' \\
-  --data-urlencode 'auth=${agentWallet.privateKey}'`
+          messageExample: responseFormatter.formatCommandExample(agentWallet.privateKey)
         });
         
       } catch (retryError) {
@@ -397,10 +414,20 @@ app.get('/register', async (req, res) => {
             }
           };
         } catch (messageError) {
-          response.pendingMessage = {
-            status: 'failed',
-            error: messageError.message
-          };
+          // Check for insufficient funds specifically
+          if (messageError.code === 'INSUFFICIENT_FUNDS' || 
+              messageError.message.includes('insufficient funds')) {
+            response.pendingMessage = {
+              status: 'failed',
+              error: 'Insufficient funds to send message. The wallet needs to be funded.',
+              fundingAddress: address
+            };
+          } else {
+            response.pendingMessage = {
+              status: 'failed',
+              error: messageError.message
+            };
+          }
         }
       }
       
@@ -489,10 +516,20 @@ app.get('/register', async (req, res) => {
                 }
               };
             } catch (messageError) {
-              response.pendingMessage = {
-                status: 'failed',
-                error: messageError.message
-              };
+              // Check for insufficient funds specifically
+              if (messageError.code === 'INSUFFICIENT_FUNDS' || 
+                  messageError.message.includes('insufficient funds')) {
+                response.pendingMessage = {
+                  status: 'failed',
+                  error: 'Insufficient funds to send message. The wallet needs to be funded.',
+                  fundingAddress: address
+                };
+              } else {
+                response.pendingMessage = {
+                  status: 'failed',
+                  error: messageError.message
+                };
+              }
             }
           }
           
