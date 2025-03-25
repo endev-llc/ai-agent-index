@@ -40,18 +40,6 @@ class ResponseFormatter {
       fundingInstructions: "Fund this wallet with Base Sepolia ETH from a faucet. You can get test ETH from https://www.coinbase.com/faucets/base-sepolia-faucet"
     };
   }
-
-  /**
-   * Format a server wallet insufficient funds error
-   */
-  serverWalletInsufficientFundsError() {
-    return {
-      status: "server_error",
-      message: "The messaging service is temporarily unavailable",
-      details: "Our server wallet needs to be refilled. Please try again later or contact support.",
-      note: "This is a server-side issue, not related to your wallet."
-    };
-  }
   
   /**
    * Format an error response
