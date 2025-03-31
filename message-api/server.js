@@ -263,10 +263,11 @@ app.get('/erc4337message', async (req, res) => {
     // Create the account interface
     const accountInterface = new ethers.utils.Interface(accountAbi);
     
-    // Build callData to call "execTransaction" on the user's account
+    // Using a format that better resembles a standard transaction
+    // This is critical for proper indexing by block explorers
     const callData = accountInterface.encodeFunctionData("execTransaction", [
       to,
-      0,
+      0, // No ETH value
       ethers.utils.toUtf8Bytes(text)
     ]);
     console.log(`Call data created: ${callData}`);
@@ -275,12 +276,12 @@ app.get('/erc4337message', async (req, res) => {
     const currentNonce = await entryPointContract.nonces(accountAddr);
     console.log(`Current nonce for ${accountAddr}: ${currentNonce.toString()}`);
 
-    // Sign userOp
+    // Sign userOp with a more standard format
     console.log("Signing user operation...");
     const signature = await signUserOp(userWallet, accountAddr, currentNonce.toString(), callData);
     console.log(`Signature: ${signature}`);
 
-    // Build userOp
+    // Build userOp with all required fields
     const userOp = buildUserOp(
       accountAddr,
       callData,

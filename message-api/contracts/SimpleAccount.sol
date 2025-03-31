@@ -2,6 +2,7 @@
 pragma solidity ^0.8.19;
 
 import "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
+import "@openzeppelin/contracts/interfaces/IERC20.sol";
 
 contract SimpleAccount {
     using ECDSA for bytes32;
@@ -11,6 +12,8 @@ contract SimpleAccount {
     address public entryPoint;
 
     event TransactionExecuted(address indexed target, uint256 value, bytes data);
+    // Standard event for ETH transfers that block explorers recognize
+    event Transfer(address indexed from, address indexed to, uint256 value);
 
     constructor(address _owner, address _entryPoint) {
         owner = _owner;
@@ -28,7 +31,6 @@ contract SimpleAccount {
         uint256 _nonce,
         bytes calldata signature
     ) external view returns (bool sigOK, bytes memory errMsg) {
-        // Only allow calls from the entryPoint
         require(msg.sender == entryPoint, "only entryPoint can validate");
         require(_entryPoint == entryPoint, "wrong entryPoint");
         require(_nonce == nonce, "invalid nonce");
@@ -49,7 +51,37 @@ contract SimpleAccount {
     ) external onlyOwnerOrEntryPoint returns (bool success, bytes memory result) {
         ++nonce; // Increment nonce with each transaction
         
+        // For ETH transfers that need to show up in block explorer transaction histories
+        if (data.length == 0 || value > 0) {
+            // This is a standard ETH transfer
+            emit Transfer(address(this), target, value);
+        }
+        
+        // For token transfers
+        if (data.length >= 4) {
+            // Check if this is a token transfer (ERC20)
+            bytes4 methodId = bytes4(data[:4]);
+            if (methodId == IERC20.transfer.selector) {
+                // This will help block explorers recognize token transfers
+                address to;
+                uint256 amount;
+                
+                // Parse the token transfer parameters (recipient address and amount)
+                assembly {
+                    // Skip first 4 bytes (method ID) and load the first parameter (address)
+                    to := calldataload(add(data.offset, 4))
+                    // Skip first parameter (32 bytes) and load the second parameter (amount)
+                    amount := calldataload(add(data.offset, 36))
+                }
+                
+                // Log it with Transfer event for better indexing
+                emit Transfer(owner, to, amount);
+            }
+        }
+        
+        // Execute the actual transaction
         (success, result) = target.call{value: value}(data);
+        
         if (success) {
             emit TransactionExecuted(target, value, data);
         }

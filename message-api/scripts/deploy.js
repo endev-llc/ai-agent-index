@@ -29,7 +29,7 @@ async function main() {
     value: hre.ethers.parseEther("0.01")
   });
   await tx.wait();
-  console.log("Paymaster funded with 0.1 ETH");
+  console.log("Paymaster funded with 0.01 ETH");
 
   console.log("\nDeployment Summary:");
   console.log(`EntryPoint: ${entryPointAddress}`);
