@@ -99,3 +99,5 @@ deployment-*.yaml
 skandha-bundler/config.json
 message-api/package-lock.json
 message-api/skandha-config.json
+cache/
+artifacts/

@@ -74,6 +74,243 @@ async function getMinimumViableGasPrice() {
   }
 }
 
+// -------------------------------------------------------------------------------------------------
+// BELOW: ADDED ERC-4337-SPECIFIC CODE - DO NOT REMOVE OR MODIFY EXISTING CODE ABOVE THIS LINE
+// -------------------------------------------------------------------------------------------------
+
+// Load environment variables for ERC-4337
+const ENTRYPOINT_ADDRESS = process.env.ENTRYPOINT_ADDRESS;
+const FACTORY_ADDRESS = process.env.FACTORY_ADDRESS;
+const PAYMASTER_ADDRESS = process.env.PAYMASTER_ADDRESS;
+
+// Minimal ABIs
+const entryPointAbi = [
+  "function handleOps((address sender, bytes callData, uint256 nonce, bytes signature, address paymaster)[]) external",
+  "function nonces(address) view returns (uint256)"
+];
+
+const factoryAbi = [
+  "function createAccount(address owner) external returns (address)",
+  "function getAddress(address owner) external view returns (address)"
+];
+
+const accountAbi = [
+  "function execTransaction(address target, uint256 value, bytes calldata data) external returns (bool, bytes memory)"
+];
+
+// Infra signer for deployments & paymaster
+let infraSigner, factoryContract, entryPointContract;
+
+// Store each user's deployed ERC-4337 account address
+let userAccountMap = {};
+
+async function initERC4337() {
+  if (ENTRYPOINT_ADDRESS && FACTORY_ADDRESS) {
+    infraSigner = new ethers.Wallet(PRIVATE_KEY, provider);
+    factoryContract = new ethers.Contract(FACTORY_ADDRESS, factoryAbi, infraSigner);
+    entryPointContract = new ethers.Contract(ENTRYPOINT_ADDRESS, entryPointAbi, infraSigner);
+    console.log("ERC-4337 references loaded.");
+    console.log(`EntryPoint: ${ENTRYPOINT_ADDRESS}`);
+    console.log(`Factory: ${FACTORY_ADDRESS}`);
+    console.log(`Paymaster: ${PAYMASTER_ADDRESS || 'Not set'}`);
+  } else {
+    console.log("ENTRYPOINT_ADDRESS or FACTORY_ADDRESS not set. ERC-4337 flow will not be used.");
+  }
+}
+initERC4337().catch(console.error);
+
+async function create4337AccountIfNeeded(userPubKey) {
+  if (!factoryContract) {
+    throw new Error("Factory contract not initialized. Check .env for FACTORY_ADDRESS.");
+  }
+  
+  // First check if we have the account in our cache
+  if (userAccountMap[userPubKey]) {
+    console.log(`Using cached account for ${userPubKey}: ${userAccountMap[userPubKey]}`);
+    return userAccountMap[userPubKey];
+  }
+  
+  try {
+    // Try getting the counterfactual address
+    console.log(`Checking if account exists for ${userPubKey} using getAddress...`);
+    const expectedAddr = await factoryContract.getAddress(userPubKey);
+    console.log(`Expected account address: ${expectedAddr}`);
+    
+    const code = await provider.getCode(expectedAddr);
+    
+    // If the account already exists (has code), return it
+    if (code !== "0x") {
+      console.log(`Account already deployed at ${expectedAddr}`);
+      userAccountMap[userPubKey] = expectedAddr;
+      return expectedAddr;
+    }
+    
+    console.log(`Account not yet deployed, creating now...`);
+    
+    // Account doesn't exist, deploy it
+    const tx = await factoryContract.createAccount(userPubKey, {
+      gasLimit: 1000000 // Set explicit gas limit
+    });
+    
+    console.log(`Transaction submitted: ${tx.hash}, waiting for confirmation...`);
+    const receipt = await tx.wait();
+    console.log(`Transaction confirmed in block ${receipt.blockNumber}`);
+    
+    // Look for AccountCreated event
+    for (const event of receipt.events) {
+      // Check if the event might be the AccountCreated event
+      if (event.event === "AccountCreated" && event.args) {
+        console.log(`Found AccountCreated event`);
+        const account = event.args.account;
+        const owner = event.args.owner;
+        
+        // Verify the owner matches
+        if (owner.toLowerCase() === userPubKey.toLowerCase()) {
+          console.log(`Found matching account: ${account}`);
+          userAccountMap[userPubKey] = account;
+          return account;
+        }
+      }
+    }
+    
+    // If event not found, use the expected address
+    console.log(`AccountCreated event not found, using expected address: ${expectedAddr}`);
+    userAccountMap[userPubKey] = expectedAddr;
+    return expectedAddr;
+    
+  } catch (error) {
+    console.error("Error creating account:", error);
+    throw error;
+  }
+}
+
+// Build a "UserOperation"
+function buildUserOp(sender, callData, nonce, signature, paymaster) {
+  return {
+    sender,
+    callData,
+    nonce,
+    signature,
+    paymaster: paymaster || PAYMASTER_ADDRESS
+  };
+}
+
+// Sign a user operation
+async function signUserOp(userWallet, accountAddr, nonce, callData) {
+  // Create the message hash that the user will sign
+  const messageHash = ethers.utils.keccak256(
+    ethers.utils.defaultAbiCoder.encode(
+      ["address", "uint256", "bytes"],
+      [accountAddr, nonce, callData]
+    )
+  );
+  
+  // Sign the hash
+  return userWallet.signMessage(ethers.utils.arrayify(messageHash));
+}
+
+// Send a user operation to the bundler
+async function sendUserOpToBundler(userOp) {
+  const relayUrl = process.env.BUNDLER_URL || "http://localhost:4337/relay";
+  const submitUrl = process.env.BUNDLER_SUBMIT_URL || "http://localhost:4337/submitAll";
+
+  console.log("Sending UserOp to bundler:", JSON.stringify(userOp));
+
+  // First POST to /relay
+  const resp = await fetch(relayUrl, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ ops: [userOp] })
+  }).then(r => r.json());
+  
+  if (resp.error) {
+    throw new Error(resp.error);
+  }
+  
+  console.log("Relay response:", resp);
+
+  // Then POST to /submitAll
+  const submitResp = await fetch(submitUrl, {
+    method: "POST"
+  }).then(r => r.json());
+  
+  if (submitResp.error) {
+    throw new Error(submitResp.error);
+  }
+  
+  console.log("Submit response:", submitResp);
+  return submitResp.txHash;
+}
+
+// Updated ERC-4337 message endpoint
+app.get('/erc4337message', async (req, res) => {
+  try {
+    const { to, text, auth } = req.query;
+    if (!to || !text || !auth) {
+      return res.status(400).json({ error: "Missing to/text/auth" });
+    }
+
+    // Build a local user signer
+    const userWallet = new ethers.Wallet(auth, provider);
+    const userPubKey = await userWallet.getAddress();
+    console.log(`User public key: ${userPubKey}`);
+
+    // Deploy a new contract account if needed
+    console.log("Creating account if needed...");
+    const accountAddr = await create4337AccountIfNeeded(userPubKey);
+    console.log(`Using account ${accountAddr} for user ${userPubKey}`);
+
+    // Create the account interface
+    const accountInterface = new ethers.utils.Interface(accountAbi);
+    
+    // Build callData to call "execTransaction" on the user's account
+    const callData = accountInterface.encodeFunctionData("execTransaction", [
+      to,
+      0,
+      ethers.utils.toUtf8Bytes(text)
+    ]);
+    console.log(`Call data created: ${callData}`);
+
+    // Retrieve the current nonce from EntryPoint
+    const currentNonce = await entryPointContract.nonces(accountAddr);
+    console.log(`Current nonce for ${accountAddr}: ${currentNonce.toString()}`);
+
+    // Sign userOp
+    console.log("Signing user operation...");
+    const signature = await signUserOp(userWallet, accountAddr, currentNonce.toString(), callData);
+    console.log(`Signature: ${signature}`);
+
+    // Build userOp
+    const userOp = buildUserOp(
+      accountAddr,
+      callData,
+      currentNonce.toString(),
+      signature
+    );
+    console.log("User operation built:", userOp);
+
+    // Post userOp to bundler
+    console.log("Sending to bundler...");
+    const txHash = await sendUserOpToBundler(userOp);
+    console.log(`Transaction hash: ${txHash}`);
+
+    return res.json({
+      success: true,
+      from: accountAddr,
+      to,
+      text,
+      handleOpsTxHash: txHash
+    });
+  } catch (err) {
+    console.error("Error in /erc4337message:", err);
+    return res.status(500).json({ error: err.message, stack: err.stack });
+  }
+});
+
+// -------------------------------------------------------------------------------------------------
+// KEEPING ALL EXISTING ENDPOINTS & LOGIC BELOW (OLD FLOW)
+// -------------------------------------------------------------------------------------------------
+
 // Universal message endpoint
 app.get('/message', async (req, res) => {
   try {
