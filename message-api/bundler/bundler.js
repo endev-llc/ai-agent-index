@@ -83,17 +83,53 @@ app.post('/submitAll', async (req, res) => {
       // Clear the queue before we submit to avoid double-submission
       pendingOps = [];
       
-      // Submit the operations to the EntryPoint
+      // Get current gas prices from the network with adequate buffer
+      const feeData = await provider.getFeeData();
+      console.log("Current network fee data:", {
+        maxFeePerGas: ethers.utils.formatUnits(feeData.maxFeePerGas || feeData.gasPrice, "gwei") + " gwei",
+        maxPriorityFeePerGas: feeData.maxPriorityFeePerGas ? 
+          ethers.utils.formatUnits(feeData.maxPriorityFeePerGas, "gwei") + " gwei" : "not available"
+      });
+      
+      // Set gas prices with a buffer to ensure the transaction is accepted
+      // Using factor of 3 to ensure it's definitely high enough
+      const maxFeePerGas = feeData.maxFeePerGas ? 
+        feeData.maxFeePerGas.mul(3) : 
+        ethers.utils.parseUnits("1", "gwei");
+        
+      const maxPriorityFeePerGas = feeData.maxPriorityFeePerGas ?
+        feeData.maxPriorityFeePerGas.mul(3) :
+        ethers.utils.parseUnits("0.1", "gwei");
+      
+      console.log("Using gas settings:", {
+        maxFeePerGas: ethers.utils.formatUnits(maxFeePerGas, "gwei") + " gwei",
+        maxPriorityFeePerGas: ethers.utils.formatUnits(maxPriorityFeePerGas, "gwei") + " gwei"
+      });
+      
+      // Debug: print out the operations we're about to submit
+      console.log("Operations to submit:", JSON.stringify(opsToSubmit));
+      
+      // Submit the operations to the EntryPoint with higher gas limit for safety
       const tx = await entryPointContract.handleOps(opsToSubmit, {
-        gasLimit: 3000000
+        gasLimit: 5000000,  // Increased gas limit to handle potential complexity
+        maxFeePerGas,
+        maxPriorityFeePerGas
       });
       
       console.log(`Transaction submitted: ${tx.hash}`);
       
-      // Wait for the transaction to be mined
-      const receipt = await tx.wait();
+      // Wait for confirmation with additional timeout for network congestion
+      const receipt = await tx.wait(1); // Wait for 1 confirmation
       
-      console.log(`Transaction confirmed in block ${receipt.blockNumber}`);
+      console.log(`Transaction confirmed in block ${receipt.blockNumber} with status ${receipt.status}`);
+      
+      if (receipt.status === 0) {
+        console.error("Transaction was mined but failed. Gas used:", receipt.gasUsed.toString());
+        return res.status(500).json({ 
+          error: "Transaction execution failed",
+          txHash: receipt.transactionHash
+        });
+      }
       
       return res.json({
         success: true,
