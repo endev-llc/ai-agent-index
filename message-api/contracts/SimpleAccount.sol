@@ -2,6 +2,7 @@
 pragma solidity ^0.8.19;
 
 import "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
+import "@openzeppelin/contracts/interfaces/IERC20.sol";
 
 contract SimpleAccount {
     using ECDSA for bytes32;
@@ -10,7 +11,9 @@ contract SimpleAccount {
     uint256 public nonce;
     address public entryPoint;
 
-    event TransactionExecuted(address indexed from, address indexed to, uint256 value, bytes data);
+    event TransactionExecuted(address indexed target, uint256 value, bytes data);
+    // Standard event for ETH transfers that block explorers recognize
+    event Transfer(address indexed from, address indexed to, uint256 value);
 
     constructor(address _owner, address _entryPoint) {
         owner = _owner;
@@ -30,6 +33,7 @@ contract SimpleAccount {
     ) external view returns (bool sigOK, bytes memory errMsg) {
         require(msg.sender == entryPoint, "only entryPoint can validate");
         require(_entryPoint == entryPoint, "wrong entryPoint");
+        require(_nonce == nonce, "invalid nonce");
         
         bytes32 hash = keccak256(abi.encodePacked(address(this), block.chainid, _nonce, callData));
         address recovered = hash.toEthSignedMessageHash().recover(signature);
@@ -40,31 +44,52 @@ contract SimpleAccount {
         return (false, "Invalid Signature");
     }
 
-    // The key function that actually performs transfers
     function execTransaction(
         address target,
         uint256 value,
         bytes calldata data
     ) external onlyOwnerOrEntryPoint returns (bool success, bytes memory result) {
-        // THIS IS THE KEY CHANGE: We're doing an actual ETH transfer first
-        // Even with 0 ETH, this creates a proper "transfer" in blockchain explorers
-        (bool transferSuccess,) = target.call{value: 1 wei}("");
-        require(transferSuccess, "ETH transfer failed");
+        ++nonce; // Increment nonce with each transaction
         
-        // Then execute the message data if there is any
-        if (data.length > 0) {
-            (success, result) = target.call(data);
-            require(success, "Transaction execution failed");
-        } else {
-            success = true;
+        // For ETH transfers that need to show up in block explorer transaction histories
+        if (data.length == 0 || value > 0) {
+            // This is a standard ETH transfer
+            emit Transfer(address(this), target, value);
         }
         
-        emit TransactionExecuted(owner, target, value, data);
+        // For token transfers
+        if (data.length >= 4) {
+            // Check if this is a token transfer (ERC20)
+            bytes4 methodId = bytes4(data[:4]);
+            if (methodId == IERC20.transfer.selector) {
+                // This will help block explorers recognize token transfers
+                address to;
+                uint256 amount;
+                
+                // Parse the token transfer parameters (recipient address and amount)
+                assembly {
+                    // Skip first 4 bytes (method ID) and load the first parameter (address)
+                    to := calldataload(add(data.offset, 4))
+                    // Skip first parameter (32 bytes) and load the second parameter (amount)
+                    amount := calldataload(add(data.offset, 36))
+                }
+                
+                // Log it with Transfer event for better indexing
+                emit Transfer(owner, to, amount);
+            }
+        }
+        
+        // Execute the actual transaction
+        (success, result) = target.call{value: value}(data);
+        
+        if (success) {
+            emit TransactionExecuted(target, value, data);
+        }
         
         return (success, result);
     }
 
     // Allow receiving ETH
-    receive() external payable {}
     fallback() external payable {}
+    receive() external payable {}
 }

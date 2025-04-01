@@ -197,15 +197,15 @@ function buildUserOp(sender, callData, nonce, signature, paymaster) {
 
 // Sign a user operation
 async function signUserOp(userWallet, accountAddr, nonce, callData) {
-  // Create the message hash that the user will sign - match SimpleAccount implementation
+  // Create the message hash that the user will sign
   const messageHash = ethers.utils.keccak256(
     ethers.utils.defaultAbiCoder.encode(
-      ["address", "uint256", "uint256", "bytes"],
-      [accountAddr, await provider.getNetwork().then(n => n.chainId), nonce, callData]
+      ["address", "uint256", "bytes"],
+      [accountAddr, nonce, callData]
     )
   );
   
-  // Sign the hash as an Ethereum message
+  // Sign the hash
   return userWallet.signMessage(ethers.utils.arrayify(messageHash));
 }
 
@@ -259,24 +259,15 @@ app.get('/erc4337message', async (req, res) => {
     console.log("Creating account if needed...");
     const accountAddr = await create4337AccountIfNeeded(userPubKey);
     console.log(`Using account ${accountAddr} for user ${userPubKey}`);
-    
-    // Fund the account with a tiny bit of ETH for transfers
-    console.log("Ensuring account has minimum ETH for transfers...");
-    const fundTx = await infraSigner.sendTransaction({
-      to: accountAddr,
-      value: ethers.utils.parseEther("0.0001") // Small amount for transfers
-    });
-    await fundTx.wait();
-    console.log("Account funded with minimum ETH");
 
     // Create the account interface
     const accountInterface = new ethers.utils.Interface(accountAbi);
     
-    // This is a critical change - we're formulating the callData to ensure
-    // the account executes an actual transfer operation, not just message data
+    // Using a format that better resembles a standard transaction
+    // This is critical for proper indexing by block explorers
     const callData = accountInterface.encodeFunctionData("execTransaction", [
       to,
-      1, // Transfer a symbolic 1 wei to ensure it shows up in transactions
+      0, // No ETH value
       ethers.utils.toUtf8Bytes(text)
     ]);
     console.log(`Call data created: ${callData}`);
@@ -285,12 +276,12 @@ app.get('/erc4337message', async (req, res) => {
     const currentNonce = await entryPointContract.nonces(accountAddr);
     console.log(`Current nonce for ${accountAddr}: ${currentNonce.toString()}`);
 
-    // Sign userOp
+    // Sign userOp with a more standard format
     console.log("Signing user operation...");
     const signature = await signUserOp(userWallet, accountAddr, currentNonce.toString(), callData);
     console.log(`Signature: ${signature}`);
 
-    // Build userOp
+    // Build userOp with all required fields
     const userOp = buildUserOp(
       accountAddr,
       callData,

@@ -5,30 +5,36 @@ contract SimplePaymaster {
     address public owner;
     address public entryPoint;
 
+    event PaymasterFunded(uint256 amount);
+    
     constructor(address _entryPoint) {
         owner = msg.sender;
         entryPoint = _entryPoint;
     }
 
-    // Fund the paymaster
-    receive() external payable {}
+    // Fund the paymaster for gas sponsoring
+    receive() external payable {
+        emit PaymasterFunded(msg.value);
+    }
     
-    // Support older deposits too
-    function deposit() external payable {}
-    
-    // Withdraw funds
+    // Validate paymaster data - simplified version
+    function validatePaymasterUserOp(
+        address sender,
+        uint256 nonce,
+        bytes calldata initCode,
+        bytes calldata callData,
+        bytes calldata paymasterAndData
+    ) external view returns (bool valid, bytes memory context) {
+        // Only entryPoint can call this function
+        require(msg.sender == entryPoint, "not from EntryPoint");
+        
+        // In a simplified implementation, we'll sponsor all transactions
+        return (true, "");
+    }
+
+    // Allow owner to withdraw funds
     function withdraw(address payable to, uint256 amount) external {
         require(msg.sender == owner, "not owner");
         to.transfer(amount);
-    }
-    
-    // Allow EntryPoint to transfer funds for paymaster operations
-    function depositTo(address account) external payable {
-        require(msg.sender == entryPoint, "only entryPoint can deposit");
-        // Forward funds to the entryPoint to handle gas costs
-        (bool success, ) = entryPoint.call{value: msg.value}(
-            abi.encodeWithSignature("depositFor(address)", account)
-        );
-        require(success, "deposit failed");
     }
 }
